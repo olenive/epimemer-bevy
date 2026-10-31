@@ -1,0 +1,10 @@
+{
+  "event_type": "graph_switched",
+  "category": "graph",
+  "graph": "fixture",
+  "session_id": "5e55e55e000040008000000000000001",
+  "timestamp": "2026-10-20T18:07:00.000000Z",
+  "previous_graph": "scratch",
+  "new_graph": "fixture",
+  "seq": 11
+}

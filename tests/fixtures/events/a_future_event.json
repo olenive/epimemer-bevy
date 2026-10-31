@@ -1,0 +1,13 @@
+{
+  "event_type": "a_future_event",
+  "category": "graph",
+  "graph": "fixture",
+  "session_id": "5e55e55e000040008000000000000001",
+  "timestamp": "2026-10-20T18:08:00.000000Z",
+  "something_new": [
+    1,
+    2,
+    3
+  ],
+  "seq": 14
+}

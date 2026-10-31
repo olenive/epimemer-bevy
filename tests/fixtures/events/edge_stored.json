@@ -1,0 +1,19 @@
+{
+  "event_type": "edge_stored",
+  "category": "graph",
+  "graph": "fixture",
+  "session_id": "5e55e55e000040008000000000000001",
+  "timestamp": "2026-10-20T18:02:11.104900Z",
+  "edge": {
+    "edge_id": "ed000000-0000-4000-8000-000000000010",
+    "src_id": "fac70000-0000-4000-8000-000000000003",
+    "dst_id": "a1e0c7d2-0000-4000-8000-000000000002",
+    "edge_type": "extracted_under_topic",
+    "weight": 1.0,
+    "validity": [],
+    "created_at": "2026-10-20T18:02:11.100500Z",
+    "graph": "fixture",
+    "metadata": {}
+  },
+  "seq": 8
+}

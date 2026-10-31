@@ -1,0 +1,12 @@
+{
+  "event_type": "node_status_changed",
+  "category": "graph",
+  "graph": "fixture",
+  "session_id": "5e55e55e000040008000000000000001",
+  "timestamp": "2026-10-20T18:05:00.000000Z",
+  "node_id": "fac70000-0000-4000-8000-000000000002",
+  "old_status": "active",
+  "new_status": "corrected",
+  "counterpart": "fac70000-0000-4000-8000-000000000003",
+  "seq": 9
+}

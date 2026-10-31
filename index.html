@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>epimemer-bevy</title>
+    <!-- The crate, built for wasm32 and bound by wasm-bindgen; a release
+         build uses the wasm-release profile (Cargo.toml) and is shrunk with
+         wasm-opt -Oz. -->
+    <link data-trunk rel="rust" data-bin="epimemer-bevy"
+          data-cargo-profile-release="wasm-release" data-wasm-opt="z">
+    <!-- assets/, from which Bevy's asset server fetches the font. -->
+    <link data-trunk rel="copy-dir" href="assets">
+    <style>
+      /* The scene's own background, scene.rs's BACKGROUND, so the page
+         does not flash while the bundle loads. */
+      html, body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #040408;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        outline: none;
+      }
+      /* What the start is doing, until the app draws, or why it stopped. */
+      #status {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+        padding: 16px;
+        color: #9aa3b2;
+        font: 15px/1.5 system-ui, sans-serif;
+        white-space: pre-wrap;
+        text-align: center;
+        pointer-events: none;
+      }
+      #status.failed {
+        color: #f0b8b8;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="epimemer-bevy"></canvas>
+    <p id="status">Reading the graph from the hub…</p>
+  </body>
+</html>

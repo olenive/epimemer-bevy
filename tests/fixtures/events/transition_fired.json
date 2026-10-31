@@ -1,0 +1,13 @@
+{
+  "event_type": "transition_fired",
+  "category": "pipeline",
+  "graph": "fixture",
+  "session_id": "5e55e55e000040008000000000000001",
+  "timestamp": "2026-10-20T18:02:10.900000Z",
+  "pipeline_name": "store",
+  "transition_name": "embed",
+  "input_places": [
+    "claims"
+  ],
+  "seq": 4
+}

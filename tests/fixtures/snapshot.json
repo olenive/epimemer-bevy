@@ -1,0 +1,245 @@
+{
+  "schema_version": 1,
+  "graph": "fixture",
+  "nodes": [
+    {
+      "node_id": "a1e0c7d2-0000-4000-8000-000000000001",
+      "node_type": "topic",
+      "content": "Bird migration",
+      "description": "When and why birds move between breeding and wintering grounds.",
+      "status": "active",
+      "source_id": null,
+      "extraction_method": "unspecified",
+      "confidence": null,
+      "retrieved_at": null,
+      "created_at": "2026-07-23T22:20:22.065298Z",
+      "graph": "fixture",
+      "metadata": {}
+    },
+    {
+      "node_id": "a1e0c7d2-0000-4000-8000-000000000002",
+      "node_type": "topic",
+      "content": "Swifts",
+      "description": "The common swift and its relatives.",
+      "status": "active",
+      "source_id": "5e600000-0000-4000-8000-000000000001",
+      "extraction_method": "agent",
+      "confidence": null,
+      "retrieved_at": "2026-10-19T08:00:00.000001Z",
+      "created_at": "2026-08-02T09:15:00.500000Z",
+      "graph": "fixture",
+      "metadata": {}
+    },
+    {
+      "node_id": "fac70000-0000-4000-8000-000000000001",
+      "node_type": "fact",
+      "content": "Common swifts winter in sub-Saharan Africa.",
+      "description": "",
+      "status": "active",
+      "source_id": "5e600000-0000-4000-8000-000000000001",
+      "extraction_method": "agent",
+      "confidence": 0.9,
+      "retrieved_at": null,
+      "created_at": "2026-08-02T09:15:00.512345Z",
+      "graph": "fixture",
+      "metadata": {
+        "confidence_basis": "stated in the source"
+      }
+    },
+    {
+      "node_id": "fac70000-0000-4000-8000-000000000002",
+      "node_type": "fact",
+      "content": "Swifts arrive in Britain in late April.",
+      "description": "",
+      "status": "active",
+      "source_id": "5e600000-0000-4000-8000-000000000002",
+      "extraction_method": "agent",
+      "confidence": null,
+      "retrieved_at": null,
+      "created_at": "2026-09-14T17:40:03.000004Z",
+      "graph": "fixture",
+      "metadata": {}
+    },
+    {
+      "node_id": "1fe00000-0000-4000-8000-000000000001",
+      "node_type": "inference",
+      "content": "Swifts spend most of the year away from their breeding grounds.",
+      "description": "",
+      "status": "active",
+      "source_id": null,
+      "extraction_method": "reflect",
+      "confidence": 0.7,
+      "retrieved_at": null,
+      "created_at": "2026-09-14T17:41:00.000000Z",
+      "graph": "fixture",
+      "metadata": {}
+    },
+    {
+      "node_id": "0dd00000-0000-4000-8000-000000000001",
+      "node_type": "unknown",
+      "content": "A kind this schema version does not name.",
+      "description": "",
+      "status": "active",
+      "source_id": null,
+      "extraction_method": "unspecified",
+      "confidence": null,
+      "retrieved_at": null,
+      "created_at": "2026-10-20T11:17:45.191899Z",
+      "graph": "fixture",
+      "metadata": {}
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "ed000000-0000-4000-8000-000000000001",
+      "src_id": "fac70000-0000-4000-8000-000000000001",
+      "dst_id": "a1e0c7d2-0000-4000-8000-000000000002",
+      "edge_type": "extracted_under_topic",
+      "weight": 1.0,
+      "validity": [],
+      "created_at": "2026-08-02T09:15:00.512400Z",
+      "graph": "fixture",
+      "metadata": {}
+    },
+    {
+      "edge_id": "ed000000-0000-4000-8000-000000000002",
+      "src_id": "1fe00000-0000-4000-8000-000000000001",
+      "dst_id": "a1e0c7d2-0000-4000-8000-000000000001",
+      "edge_type": "abstracts",
+      "weight": 1.0,
+      "validity": [],
+      "created_at": "2026-09-14T17:41:00.000100Z",
+      "graph": "fixture",
+      "metadata": {}
+    },
+    {
+      "edge_id": "ed000000-0000-4000-8000-000000000003",
+      "src_id": "fac70000-0000-4000-8000-000000000002",
+      "dst_id": "a1e0c7d2-0000-4000-8000-000000000002",
+      "edge_type": "tagged_with_topic",
+      "weight": 1.0,
+      "validity": [],
+      "created_at": "2026-09-14T17:40:03.000100Z",
+      "graph": "fixture",
+      "metadata": {}
+    },
+    {
+      "edge_id": "ed000000-0000-4000-8000-000000000004",
+      "src_id": "fac70000-0000-4000-8000-000000000001",
+      "dst_id": "1fe00000-0000-4000-8000-000000000001",
+      "edge_type": "supports",
+      "weight": 1.0,
+      "validity": [],
+      "created_at": "2026-09-14T17:41:00.000200Z",
+      "graph": "fixture",
+      "metadata": {}
+    },
+    {
+      "edge_id": "ed000000-0000-4000-8000-000000000005",
+      "src_id": "5e600000-0000-4000-8000-000000000001",
+      "dst_id": "fac70000-0000-4000-8000-000000000001",
+      "edge_type": "contains",
+      "weight": 1.0,
+      "validity": [],
+      "created_at": "2026-08-02T09:15:00.512500Z",
+      "graph": "fixture",
+      "metadata": {}
+    },
+    {
+      "edge_id": "ed000000-0000-4000-8000-000000000006",
+      "src_id": "fac70000-0000-4000-8000-000000000001",
+      "dst_id": "d0c00000-0000-4000-8000-000000000001",
+      "edge_type": "sourced_from",
+      "weight": 1.0,
+      "validity": [
+        {
+          "start": {
+            "instant_kind": "precise",
+            "at": "2026-04-20T00:00:00Z",
+            "label": null
+          },
+          "end": {
+            "instant_kind": "unknown"
+          },
+          "timeline_id": null,
+          "witnessed_at": null,
+          "basis": "stated"
+        }
+      ],
+      "created_at": "2026-08-02T09:15:00.512600Z",
+      "graph": "fixture",
+      "metadata": {}
+    },
+    {
+      "edge_id": "ed000000-0000-4000-8000-000000000007",
+      "src_id": "fac70000-0000-4000-8000-000000000001",
+      "dst_id": "the-real",
+      "edge_type": "has_metacontext",
+      "weight": 1.0,
+      "validity": [],
+      "created_at": "2026-08-02T09:15:00.512700Z",
+      "graph": "fixture",
+      "metadata": {}
+    },
+    {
+      "edge_id": "ed000000-0000-4000-8000-000000000008",
+      "src_id": "1fe00000-0000-4000-8000-000000000001",
+      "dst_id": "7171e000-0000-4000-8000-000000000001",
+      "edge_type": "timelink",
+      "weight": 1.0,
+      "validity": [],
+      "created_at": "2026-09-14T17:41:00.000300Z",
+      "graph": "fixture",
+      "metadata": {
+        "timepoint_id": "7e000000-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "edge_id": "ed000000-0000-4000-8000-000000000009",
+      "src_id": "a1e0c7d2-0000-4000-8000-000000000002",
+      "dst_id": "a1e0c7d2-0000-4000-8000-000000000001",
+      "edge_type": "tagged_with_topic",
+      "weight": 1.0,
+      "validity": [],
+      "created_at": "2026-08-02T09:15:00.600000Z",
+      "graph": "fixture",
+      "metadata": {}
+    }
+  ],
+  "boundary_proposals": [],
+  "timelines": [
+    {
+      "timeline_id": "7171e000-0000-4000-8000-000000000001",
+      "name": "The world",
+      "description": "",
+      "timepoints": [
+        {
+          "timepoint_id": "7e000000-0000-4000-8000-000000000001",
+          "start": null,
+          "end": null,
+          "label": "Some spring",
+          "kind": "vague",
+          "earliest": "2026-03-01T00:00:00Z",
+          "latest": null,
+          "contested": false,
+          "temporal_contradiction_id": null,
+          "metadata": {}
+        }
+      ],
+      "recurrences": [],
+      "reference_time": null,
+      "created_at": "2026-07-23T22:20:22.000000Z",
+      "graph": "fixture",
+      "metadata": {}
+    }
+  ],
+  "metacontexts": [
+    {
+      "metacontext_id": "the-real",
+      "content": "The Real",
+      "description": "Base reality, the default world for claims.",
+      "graph": "fixture"
+    }
+  ],
+  "relation_labels": []
+}

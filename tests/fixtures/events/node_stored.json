@@ -1,0 +1,22 @@
+{
+  "event_type": "node_stored",
+  "category": "graph",
+  "graph": "fixture",
+  "session_id": "5e55e55e000040008000000000000001",
+  "timestamp": "2026-10-20T18:02:11.104512Z",
+  "node": {
+    "node_id": "fac70000-0000-4000-8000-000000000003",
+    "node_type": "fact",
+    "content": "Swifts sleep on the wing.",
+    "description": "",
+    "status": "active",
+    "source_id": "5e600000-0000-4000-8000-000000000002",
+    "extraction_method": "llm_decomposition",
+    "confidence": null,
+    "retrieved_at": null,
+    "created_at": "2026-10-20T18:02:11.100000Z",
+    "graph": "fixture",
+    "metadata": {}
+  },
+  "seq": 7
+}

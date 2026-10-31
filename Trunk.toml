@@ -1,0 +1,31 @@
+# The browser build. `trunk serve` builds the bundle into dist/ and serves it
+# with the hub's routes passed on to the hub, so that the page and the hub
+# share an origin and the hub, which sends no CORS headers, needs none
+# (VIZ_CONTRACT.md §2). `trunk build --release` builds the bundle alone,
+# shrunk with wasm-opt, for a server of its own.
+
+trunk-version = "^0.22"
+
+[build]
+target = "index.html"
+dist = "dist"
+
+[watch]
+watch = ["index.html", "Cargo.toml", "Cargo.lock", "src", "assets"]
+
+# Loopback only, as the hub is (VIZ_CONTRACT.md §2).
+[serve]
+addresses = ["127.0.0.1"]
+
+# The hub's HTTP routes, `/api/...` on the page to the same path on the hub.
+[[proxy]]
+backend = "http://127.0.0.1:8765/api/"
+
+# The hub's event stream. A browser offers per-message compression on every
+# WebSocket; the hub accepts the offer, and trunk's own connection to the
+# hub cannot take it and drops the socket, so the offer is not passed on
+# (an empty value removes the header).
+[[proxy]]
+backend = "ws://127.0.0.1:8765/ws"
+ws = true
+request_headers = { "Sec-WebSocket-Extensions" = "" }

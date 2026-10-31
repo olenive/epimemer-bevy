@@ -1,0 +1,70 @@
+[package]
+name = "epimemer-bevy"
+version = "0.1.0"
+description = "A Bevy visualiser for Epimemer graphs: one 3D scene with time as the third axis."
+edition = "2024"
+rust-version = "1.96"
+license = "MIT"
+repository = "https://github.com/olenive/epimemer-bevy"
+readme = "README.md"
+
+[dependencies]
+bevy = "0.19.1"
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+# `Instant` and `SystemTime` that work in a browser as well, where std's
+# panic; on a native target they are std's own.
+web-time = "1.1.0"
+# No Petritype crate here: the knowledge graph is not a Petri net. petritype-bevy
+# arrives with the activity bar (DESIGN.md §13) and not before.
+
+# The native transports, blocking, each on a thread of its own.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# The event stream, `ws://` on loopback: the default features are the
+# client handshake alone, with no TLS stack.
+tungstenite = "0.30.0"
+# The hub is plain HTTP on loopback (VIZ_CONTRACT.md §2), so no TLS stack.
+ureq = { version = "3.4", default-features = false }
+
+# The browser's transports, its fetch and its WebSocket, driven as tasks on
+# the page's event loop. Bevy depends on the same versions for wasm already.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3.106"
+wasm-bindgen = "0.2.129"
+wasm-bindgen-futures = "0.4.79"
+web-sys = { version = "0.3.106", features = [
+    "AbortController",
+    "AbortSignal",
+    "CloseEvent",
+    "Document",
+    "Element",
+    "Event",
+    "Headers",
+    "Location",
+    "MessageEvent",
+    "Node",
+    "Request",
+    "RequestInit",
+    "Response",
+    "Storage",
+    "WebSocket",
+    "Window",
+] }
+
+# Bevy's own advice for a debug build that is usable: the app at opt-level 1,
+# its dependencies fully optimised once and then cached.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+# The browser bundle's release build (`index.html`): the whole program
+# optimised at once and for size, which the download pays for and a native
+# build does not need.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1

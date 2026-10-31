@@ -1,0 +1,13 @@
+{
+  "type": "session_connected",
+  "session": {
+    "session_id": "5e55e55e000040008000000000000001",
+    "pid": 4242,
+    "backend": "surrealdb",
+    "active_graph": "fixture",
+    "started_at": "2026-10-20T10:32:20.431640Z",
+    "connected": true,
+    "last_event_at": null
+  },
+  "seq": 2
+}

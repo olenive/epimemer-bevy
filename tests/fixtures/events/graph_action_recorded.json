@@ -1,0 +1,21 @@
+{
+  "event_type": "graph_action_recorded",
+  "category": "graph",
+  "graph": "fixture",
+  "session_id": "5e55e55e000040008000000000000001",
+  "timestamp": "2026-10-20T18:02:11.200000Z",
+  "action_id": 31,
+  "verb": "stored",
+  "subjects": [
+    "fac70000-0000-4000-8000-000000000003"
+  ],
+  "counts": {
+    "nodes": 1,
+    "edges": 1,
+    "embeddings": 1,
+    "timelines": 0
+  },
+  "summary": "stored 1 node",
+  "judged_by": null,
+  "seq": 3
+}

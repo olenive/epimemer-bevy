@@ -1,0 +1,44 @@
+{
+  "event_type": "timeline_stored",
+  "category": "graph",
+  "graph": "fixture",
+  "session_id": "5e55e55e000040008000000000000001",
+  "timestamp": "2026-10-20T18:06:00.000000Z",
+  "timeline": {
+    "timeline_id": "7171e000-0000-4000-8000-000000000001",
+    "name": "The world",
+    "description": "",
+    "timepoints": [
+      {
+        "timepoint_id": "7e000000-0000-4000-8000-000000000001",
+        "start": null,
+        "end": null,
+        "label": "Some spring",
+        "kind": "vague",
+        "earliest": "2026-03-01T00:00:00Z",
+        "latest": "2026-05-31T00:00:00Z",
+        "contested": false,
+        "temporal_contradiction_id": null,
+        "metadata": {}
+      },
+      {
+        "timepoint_id": "7e000000-0000-4000-8000-000000000002",
+        "start": "2026-05-01T00:00:00Z",
+        "end": "2026-08-01T00:00:00Z",
+        "label": "The breeding season",
+        "kind": "interval",
+        "earliest": null,
+        "latest": null,
+        "contested": false,
+        "temporal_contradiction_id": null,
+        "metadata": {}
+      }
+    ],
+    "recurrences": [],
+    "reference_time": null,
+    "created_at": "2026-07-23T22:20:22.000000Z",
+    "graph": "fixture",
+    "metadata": {}
+  },
+  "seq": 10
+}
