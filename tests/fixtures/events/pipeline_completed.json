@@ -1,0 +1,11 @@
+{
+  "event_type": "pipeline_completed",
+  "category": "pipeline",
+  "graph": "",
+  "session_id": "5e55e55e000040008000000000000001",
+  "timestamp": "2026-10-20T18:02:11.300000Z",
+  "pipeline_name": "store",
+  "transitions_fired": 4,
+  "duration_ms": 1520.5,
+  "seq": 19
+}

@@ -751,6 +751,11 @@ mod tests {
                 graphs: vec!["fixture".into(), "other".into()],
                 active_graph: "fixture".into(),
                 backend: "surrealdb".into(),
+                reflect: crate::hub::Reflect {
+                    count: 3,
+                    threshold: 10,
+                    suggested: false,
+                },
             },
             purpose: Purpose::Switch,
             map: None,

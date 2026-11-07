@@ -10,7 +10,10 @@
 //!
 //! The controls, left to right: the session and the graph; how the event
 //! stream stands (`live.rs`): connected with the count of what it has brought,
-//! reconnecting with the last error, or reading the graph again; the time mode,
+//! reconnecting with the last error, or reading the graph again; the graph
+//! drawn's reflect counter (`reflect_counter.rs`); the Log button, which `J`
+//! presses too, and which shows the log in the side panel or returns the
+//! panel to the node (`event_log.rs`); the time mode,
 //! recorded time or claim time, which `C` switches too (`time_mode.rs`);
 //! the metacontexts, the node kinds, the status (active only, as the
 //! snapshot is); the topic subtree, the source document and the retrieval
@@ -66,13 +69,16 @@ use bevy::ui::{InteractionDisabled, UiSystems};
 use crate::background::{Pending, Poll, in_background, poll};
 use crate::camera::{BarCover, ViewRequest};
 use crate::edges::AllEdges;
+use crate::event_log::{LogOpen, toggle_log};
 use crate::filter::{Filter, Kinds, Metacontexts, Mode, kind_passes};
 use crate::graph_index::GraphIndex;
 use crate::hub::{self, GraphList, SessionInfo};
-use crate::keys::{BAR_KEY, EDGE_KEY, GO_KEY, RECALCULATE_KEY, SEARCH_KEY, VIEW_KEYS};
+use crate::keys::{BAR_KEY, EDGE_KEY, GO_KEY, LOG_KEY, RECALCULATE_KEY, SEARCH_KEY, VIEW_KEYS};
 use crate::layout::Kind;
 use crate::live::{self, LiveState};
+use crate::panel::PanelCollapsed;
 use crate::pickers::{self, MetacontextEntry, Pickers, short_id};
+use crate::reflect_counter::{self, ReflectCounter};
 use crate::relayout::{self, MapState, RecalculateLayout};
 use crate::reload::{Catalogue, LoadGraph, LoadStatus};
 use crate::retrieval::{self, RetrievalRead, Retrievals};
@@ -95,19 +101,20 @@ pub enum Picker {
     Retrieval,
 }
 
-/// How the bar starts, from `--ui-state`: open, collapsed, or open with a
-/// picker's list open, and for the topic picker, something typed.
+/// How the bar starts, from `--ui-state`: open, collapsed, open with a
+/// picker's list open, and for the topic picker, something typed, or open
+/// with the log shown in the side panel.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum UiState {
     #[default]
     Open,
     Collapsed,
     Picker(Picker, String),
+    Log,
 }
 
 /// The names `--ui-state` takes.
-pub const UI_STATES: &str =
-    "open, collapsed, sessions, graphs, metacontexts, topics, topics:PREFIX, sources or retrievals";
+pub const UI_STATES: &str = "open, collapsed, sessions, graphs, metacontexts, topics, topics:PREFIX, sources, retrievals or log";
 
 /// Reads a `--ui-state` value.
 pub fn parse_ui_state(text: &str) -> Option<UiState> {
@@ -121,6 +128,7 @@ pub fn parse_ui_state(text: &str) -> Option<UiState> {
         ("metacontexts", true) => picker(Picker::Metacontext),
         ("sources", true) => picker(Picker::Source),
         ("retrievals", true) => picker(Picker::Retrieval),
+        ("log", true) => Some(UiState::Log),
         ("topics", _) => Some(UiState::Picker(Picker::Topic, typed.to_owned())),
         _ => None,
     }
@@ -167,6 +175,8 @@ pub enum Control {
     View(ViewRequest),
     /// Recalculate layout: a new topic map.
     Recalculate,
+    /// Show the log in the side panel, or return the panel to the node.
+    Log,
     ClearTopic,
     ClearSource,
     ClearRetrieval,
@@ -200,6 +210,8 @@ enum BarText {
     WindowCaption,
     /// How the event stream stands.
     Live,
+    /// The graph drawn's reflect counter.
+    Reflect,
     Message,
 }
 
@@ -254,6 +266,8 @@ const RECORDED_HINT: &str = "Every node at the time it was recorded; C switches.
 const EDGES_HINT: &str = "Every claim-to-claim edge between visible nodes, as lines. Without it, a node's edges show while it is hovered or focused.";
 const LIVE_HINT: &str = "The event stream from the hub: every change to the graph drawn appears as it is made, and the graph is read again after the stream drops or misses something.";
 const RETRIEVAL_HINT: &str = "The nodes one tool call handed the agent, from the session's retrieval records of this graph. A record whose tool declared nothing passes every node.";
+const REFLECT_HINT: &str = "Stores since this graph's last reflect, against the count at which reflect is suggested. The hub reports it for the session's active graph only, so another graph shows a dash.";
+const LOG_HINT: &str = "The session's acts, advisories and pipeline runs, newest first, in the side panel in place of the focused node; J does the same, and again returns to the node.";
 const SEARCH_HINT: &str = "Nodes whose text or description holds what is typed, ignoring case, among those drawn. / types here; Enter focuses the next hit, Shift+Enter the one before; Escape leaves the field.";
 
 /// The bar, its strip and its pickers.
@@ -264,10 +278,13 @@ pub struct BarPlugin {
 impl Plugin for BarPlugin {
     fn build(&self, app: &mut App) {
         let (collapsed, open, typed) = match &self.start {
-            UiState::Open => (false, None, String::new()),
+            UiState::Open | UiState::Log => (false, None, String::new()),
             UiState::Collapsed => (true, None, String::new()),
             UiState::Picker(picker, typed) => (false, Some(*picker), typed.clone()),
         };
+        if self.start == UiState::Log {
+            app.insert_resource(LogOpen(true));
+        }
         app.insert_resource(Collapsed(collapsed))
             .insert_resource(OpenPicker(open))
             .insert_resource(TopicPrefix(typed))
@@ -278,6 +295,9 @@ impl Plugin for BarPlugin {
             .init_resource::<TimeMode>()
             .init_resource::<Retrievals>()
             .init_resource::<RetrievalRead>()
+            .init_resource::<LogOpen>()
+            .init_resource::<PanelCollapsed>()
+            .init_resource::<ReflectCounter>()
             .add_message::<SearchAction>()
             .add_message::<RecalculateLayout>()
             .add_observer(on_click)
@@ -398,6 +418,8 @@ struct Act<'w> {
     catalogue: ResMut<'w, Catalogue>,
     pickers: Res<'w, Pickers>,
     retrievals: Res<'w, Retrievals>,
+    log: ResMut<'w, LogOpen>,
+    panel: ResMut<'w, PanelCollapsed>,
     views: MessageWriter<'w, ViewRequest>,
     loads: MessageWriter<'w, LoadGraph>,
     search: MessageWriter<'w, SearchAction>,
@@ -441,6 +463,11 @@ fn perform(control: &Control, act: &mut Act) {
             act.recalculate.write(RecalculateLayout {
                 reason: "asked for, by the bar's button".to_owned(),
             });
+        }
+        Control::Log => {
+            let (open, collapsed) = toggle_log(act.log.0, act.panel.0);
+            act.log.set_if_neq(LogOpen(open));
+            act.panel.set_if_neq(PanelCollapsed(collapsed));
         }
         Control::Kind(kind) => act.filter.kinds = toggle_kind(act.filter.kinds, *kind),
         Control::Mode => {
@@ -903,24 +930,33 @@ type StyledControl = (
     Has<Row>,
 );
 
+/// Whether the log is what the side panel shows.
+#[derive(SystemParam)]
+struct LogShown<'w> {
+    log: Res<'w, LogOpen>,
+    panel: Res<'w, PanelCollapsed>,
+}
+
 /// Colours every control by whether it is chosen, under the pointer, or
-/// unable to do anything yet.
+/// unable to do anything yet. The Log button is chosen while the panel
+/// shows the log.
 fn style_controls(
     filter: Res<Filter>,
     catalogue: Res<Catalogue>,
     open: Res<OpenPicker>,
     edges: Res<AllEdges>,
     mode: Res<TimeMode>,
+    shown: LogShown,
     mut controls: Query<StyledControl>,
 ) {
     for (control, interaction, mut background, disabled, row) in &mut controls {
         let rest = if row { style::ROW } else { style::BUTTON };
-        let colour = style::button_colour(
-            rest,
-            is_selected(control, &filter, &catalogue, *open, *edges, *mode),
-            *interaction != Interaction::None,
-            disabled,
-        );
+        let selected = match control {
+            Control::Log => shown.log.0 && !shown.panel.0,
+            _ => is_selected(control, &filter, &catalogue, *open, *edges, *mode),
+        };
+        let colour =
+            style::button_colour(rest, selected, *interaction != Interaction::None, disabled);
         background.set_if_neq(BackgroundColor(colour));
     }
 }
@@ -949,6 +985,7 @@ struct TextData<'w, 's> {
     map: Option<Res<'w, MapState>>,
     live: Option<Res<'w, LiveState>>,
     retrievals: Option<Res<'w, Retrievals>>,
+    reflect: Option<Res<'w, ReflectCounter>>,
     hints: Query<'w, 's, (&'static Interaction, &'static Hint)>,
 }
 
@@ -1019,6 +1056,23 @@ fn update_texts(data: TextData, mut texts: Query<(&BarText, &mut Text, &mut Text
                     |state| live::status_text(state, data.catalogue.session.connected),
                 );
                 (words, if error { style::ERROR } else { style::TEXT })
+            }
+            BarText::Reflect => {
+                let (words, suggested) = reflect_counter::label(
+                    data.reflect
+                        .as_deref()
+                        .unwrap_or(&ReflectCounter::default()),
+                    &data.catalogue.session.session_id,
+                    &data.catalogue.graph,
+                );
+                (
+                    words,
+                    if suggested {
+                        style::ACCENT
+                    } else {
+                        style::TEXT
+                    },
+                )
             }
             BarText::Message => {
                 let map = data.map.as_deref().map(relayout::bar_note);
@@ -1235,6 +1289,13 @@ fn spawn_bar(mut commands: Commands, collapsed: Res<Collapsed>, search: Option<R
             ),
             (
                 style::group_node(),
+                Interaction::default(),
+                Hint(REFLECT_HINT),
+                children![(BarText::Reflect, style::text("", style::TEXT))],
+            ),
+            hinted_button(&format!("Log ({})", LOG_KEY.1), Control::Log, LOG_HINT),
+            (
+                style::group_node(),
                 children![
                     caption("Time"),
                     (
@@ -1418,6 +1479,8 @@ mod tests {
             .init_resource::<Collapsed>()
             .init_resource::<AllEdges>()
             .init_resource::<TimeMode>()
+            .init_resource::<LogOpen>()
+            .init_resource::<PanelCollapsed>()
             .insert_resource(Pickers {
                 metacontexts: listed(&["a", "b"]),
                 ..Pickers::default()
@@ -1644,6 +1707,74 @@ mod tests {
             }]
         );
         assert_eq!(app.world().resource::<OpenPicker>().0, None);
+    }
+
+    #[test]
+    fn the_log_button_shows_the_log_in_the_panel_and_returns_to_the_node() {
+        let mut app = app();
+        let log = control(&mut app, &Control::Log);
+        click(&mut app, log);
+        assert!(app.world().resource::<LogOpen>().0);
+        click(&mut app, log);
+        assert!(!app.world().resource::<LogOpen>().0);
+        // With the panel collapsed, the button opens it on the log.
+        app.insert_resource(PanelCollapsed(true));
+        click(&mut app, log);
+        assert_eq!(
+            (
+                app.world().resource::<LogOpen>().0,
+                app.world().resource::<PanelCollapsed>().0
+            ),
+            (true, false)
+        );
+    }
+
+    #[test]
+    fn the_bar_shows_the_reflect_counter_of_the_graph_drawn() {
+        let mut app = app();
+        app.init_resource::<GraphIndex>()
+            .init_resource::<LoadStatus>()
+            .init_resource::<Notice>()
+            .add_systems(Update, update_texts);
+        let words = |app: &mut App| {
+            let mut texts = app.world_mut().query::<(&BarText, &Text, &TextColor)>();
+            texts
+                .iter(app.world())
+                .find(|(which, ..)| **which == BarText::Reflect)
+                .map(|(_, text, colour)| (text.0.clone(), colour.0))
+                .unwrap()
+        };
+        app.update();
+        assert_eq!(words(&mut app), ("reflect -".to_owned(), style::TEXT));
+        let list = GraphList {
+            graphs: vec!["memory".into()],
+            active_graph: "memory".into(),
+            backend: "surrealdb".into(),
+            reflect: hub::Reflect {
+                count: 7,
+                threshold: 10,
+                suggested: false,
+            },
+        };
+        let counter = reflect_counter::from_list(&ReflectCounter::default(), "s1", &list);
+        app.insert_resource(counter.clone());
+        app.update();
+        assert_eq!(words(&mut app), ("reflect 7/10".to_owned(), style::TEXT));
+        app.insert_resource(reflect_counter::from_event(
+            &counter,
+            "s1",
+            "memory",
+            hub::Reflect {
+                count: 10,
+                threshold: 10,
+                suggested: true,
+            },
+        ));
+        app.update();
+        assert_eq!(
+            words(&mut app),
+            ("reflect 10/10, suggested".to_owned(), style::ACCENT)
+        );
     }
 
     #[test]
@@ -1914,6 +2045,7 @@ mod tests {
             parse_ui_state("retrievals"),
             Some(UiState::Picker(Picker::Retrieval, String::new()))
         );
+        assert_eq!(parse_ui_state("log"), Some(UiState::Log));
         assert_eq!(parse_ui_state("sources:x"), None, "only topics take text");
         assert_eq!(parse_ui_state("sideways"), None);
     }

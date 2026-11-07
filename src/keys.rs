@@ -66,6 +66,11 @@ pub const CLEAR_FOCUS_KEY: (KeyCode, &str) = (KeyCode::Escape, "Escape");
 /// `P`, for panel.
 pub const PANEL_KEY: (KeyCode, &str) = (KeyCode::KeyP, "P");
 
+/// The key that shows the log in the side panel, or returns the panel to
+/// the focused node, and its name in the help: `L`, for log, is the edge
+/// toggle, so `J`, for journal.
+pub const LOG_KEY: (KeyCode, &str) = (KeyCode::KeyJ, "J");
+
 /// The key that focuses the node focused before the current one, from the
 /// focus history, and its name in the help: `B`, for back.
 pub const BACK_KEY: (KeyCode, &str) = (KeyCode::KeyB, "B");
@@ -172,6 +177,7 @@ pub fn help() -> String {
     lines.push(row(EDGE_KEY.1, EDGE_KEY_WHAT));
     lines.push(row(MODE_KEY.1, MODE_KEY_WHAT));
     lines.push(row(PANEL_KEY.1, PANEL_KEY_WHAT));
+    lines.push(row(LOG_KEY.1, LOG_KEY_WHAT));
     lines.push(row(BACK_KEY.1, BACK_KEY_WHAT));
     lines.push(row(SEARCH_KEY.1, SEARCH_KEY_WHAT));
     lines.push(row("Enter", WALK_WHAT));
@@ -188,6 +194,8 @@ const CLEAR_FOCUS_WHAT: &str =
     "clear the focus, close the bar's open list, or leave the search field";
 /// What the panel's key does, for the help.
 const PANEL_KEY_WHAT: &str = "show or hide the side panel of the focused node";
+/// What the log's key does, for the help.
+const LOG_KEY_WHAT: &str = "show the log of acts, advisories and pipeline runs in the side panel, or return it to the focused node";
 /// What the back key does, for the help.
 const BACK_KEY_WHAT: &str = "focus the node focused before this one";
 /// What the search key does, for the help.
@@ -225,6 +233,7 @@ mod tests {
         codes.push(CLEAR_FOCUS_KEY.0);
         codes.extend([
             PANEL_KEY.0,
+            LOG_KEY.0,
             BACK_KEY.0,
             SEARCH_KEY.0,
             GO_KEY.0,
@@ -250,6 +259,7 @@ mod tests {
         assert!(format!("{:?}", BAR_KEY.0).ends_with(BAR_KEY.1));
         for (key, what) in [
             (PANEL_KEY, PANEL_KEY_WHAT),
+            (LOG_KEY, LOG_KEY_WHAT),
             (BACK_KEY, BACK_KEY_WHAT),
             (GO_KEY, GO_KEY_WHAT),
             (RECALCULATE_KEY, RECALCULATE_KEY_WHAT),

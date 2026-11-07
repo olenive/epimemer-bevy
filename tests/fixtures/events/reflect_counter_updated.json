@@ -1,0 +1,11 @@
+{
+  "event_type": "reflect_counter_updated",
+  "category": "graph",
+  "graph": "fixture",
+  "session_id": "5e55e55e000040008000000000000001",
+  "timestamp": "2026-10-20T18:02:11.210000Z",
+  "count": 9,
+  "threshold": 10,
+  "suggested": false,
+  "seq": 6
+}

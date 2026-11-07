@@ -1,0 +1,13 @@
+{
+  "event_type": "pipeline_failed",
+  "category": "pipeline",
+  "graph": "",
+  "session_id": "5e55e55e000040008000000000000001",
+  "timestamp": "2026-10-20T18:05:40.000000Z",
+  "pipeline_name": "reflect",
+  "error": "the embedder did not answer",
+  "transition_name": "pending_review",
+  "transitions_fired": 1,
+  "duration_ms": 30012.0,
+  "seq": 20
+}

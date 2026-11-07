@@ -22,8 +22,13 @@
 //! drawn. A `retrieval_recorded` of the session followed is kept for the
 //! Retrieval picker at once, whatever graph it is of and whether or not a
 //! graph is being read, since it changes nothing drawn (`retrieval.rs`).
-//! An event for another session or another graph is dropped, and so are the
-//! events this client does not act on.
+//! The acts, the advisories and the pipeline events of the session followed
+//! are kept for the log in the same way (`event_log.rs`), and a
+//! `reflect_counter_updated` of the session and graph followed sets the
+//! bar's reflect counter (`reflect_counter.rs`); a body among these that
+//! does not read is logged and changes nothing, since nothing drawn
+//! depends on it. An event for another session or another graph is
+//! dropped, and so are the events this client does not act on.
 //!
 //! [`LiveState`] says how the stream stands, for the bar: connected, lost
 //! and trying again with the last error, or reading the graph again; and
@@ -37,14 +42,18 @@ use web_time::Instant;
 
 use crate::apply::{self, Changes, LiveGraph, Outcome, Picture};
 use crate::camera::Places;
+use crate::event_log::{self, Log};
 use crate::focus::{Focus, Hovered};
 use crate::graph_index::GraphIndex;
-use crate::hub::{RetrievalRecord, SessionInfo};
+use crate::hub::{Reflect, RetrievalRecord, SessionInfo};
 use crate::pickers::{self, Pickers, short_id};
+use crate::reflect_counter::{self, ReflectCounter};
 use crate::relayout;
 use crate::reload::{self, Catalogue, LoadStatus, Loading, Refetch, receive_loads};
 use crate::retrieval::{self, Retrievals};
-use crate::stream::{self, Envelope, Event, Item, Message, Stream, Subscription, System};
+use crate::stream::{
+    self, Envelope, Event, Item, Message, PIPELINE_EVENTS, Pipeline, Stream, Subscription, System,
+};
 use crate::time_axis::{TimeMode, TimeModel};
 use crate::time_mode;
 
@@ -304,8 +313,39 @@ fn route(
             }
             return;
         }
-        Event::Unreadable(error) if envelope.event_type == "retrieval_recorded" => {
-            warn!("live: a retrieval record this client cannot read: {error}");
+        Event::ActRecorded(_) | Event::AdvisoryRaised(_) | Event::Pipeline(_) => {
+            let ours = envelope.session_id == session;
+            let kept = ours && keep_entry(world, &envelope);
+            if state.log_events {
+                let did = match (ours, kept) {
+                    (false, _) => "about another session",
+                    (true, true) => "kept for the log",
+                    (true, false) => "held already",
+                };
+                eprintln!("{}", beside_line(seq, &envelope, did));
+            }
+            return;
+        }
+        Event::ReflectCounterUpdated(reflect) => {
+            let ours = envelope.session_id == session && envelope.graph == graph;
+            if ours {
+                set_reflect(world, &envelope.session_id, &envelope.graph, *reflect);
+            }
+            if state.log_events {
+                let did = if ours {
+                    "the bar's reflect counter"
+                } else {
+                    "about another session or graph"
+                };
+                eprintln!("{}", beside_line(seq, &envelope, did));
+            }
+            return;
+        }
+        Event::Unreadable(error) if beside_the_graph(&envelope.event_type) => {
+            warn!(
+                "live: a {} this client cannot read: {error}",
+                envelope.event_type
+            );
             return;
         }
         _ => {}
@@ -336,6 +376,51 @@ fn route(
         return;
     }
     to_apply.push((seq, envelope));
+}
+
+/// The events kept beside the graph rather than applied to it: the
+/// retrieval records, the log's acts, advisories and pipeline events, and
+/// the reflect counter.
+fn beside_the_graph(event_type: &str) -> bool {
+    matches!(
+        event_type,
+        "retrieval_recorded"
+            | "graph_action_recorded"
+            | "advisory_raised"
+            | "reflect_counter_updated"
+    ) || PIPELINE_EVENTS.contains(&event_type)
+}
+
+/// One line for `--log-events` about an event kept beside the graph.
+fn beside_line(seq: Option<u64>, envelope: &Envelope, did: &str) -> String {
+    let seq = seq.map_or_else(|| "-".to_owned(), |s| s.to_string());
+    format!(
+        "event {seq} {} {}: {did}",
+        envelope.event_type,
+        event_subject(&envelope.event)
+    )
+}
+
+/// Keeps an act, an advisory or a pipeline line for the log; whether it
+/// changed the log.
+fn keep_entry(world: &mut World, envelope: &Envelope) -> bool {
+    let Some(mut log) = world.get_resource_mut::<Log>() else {
+        return false;
+    };
+    let kept = event_log::remember(log.bypass_change_detection(), envelope);
+    if kept {
+        log.set_changed();
+    }
+    kept
+}
+
+/// Sets the bar's reflect counter from an event of the session and graph
+/// followed.
+fn set_reflect(world: &mut World, session: &str, graph: &str, reflect: Reflect) {
+    if let Some(mut counter) = world.get_resource_mut::<ReflectCounter>() {
+        let next = reflect_counter::from_event(&counter, session, graph, reflect);
+        counter.set_if_neq(next);
+    }
 }
 
 /// Keeps a retrieval record of `session`, the session followed or being
@@ -468,16 +553,9 @@ fn load_ended(world: &mut World, state: &mut LiveState) {
     state.refetching = false;
 }
 
-/// One line for `--log-events`: the event, what it did, and the counts
-/// after it.
-pub fn event_line(
-    seq: Option<u64>,
-    envelope: &Envelope,
-    outcome: &Outcome,
-    counts: (usize, usize),
-    applied: usize,
-) -> String {
-    let subject = match &envelope.event {
+/// What an event is about, in a few words for `--log-events`.
+fn event_subject(event: &Event) -> String {
+    match event {
         Event::NodeStored(node) => format!(
             "{:?} {} {:?}",
             node.node_type,
@@ -507,9 +585,52 @@ pub fn event_line(
             retrieval::record_number(&record.record_id),
             record.tool
         ),
+        Event::ActRecorded(act) => format!(
+            "{} {}: {}",
+            retrieval::record_number(&act.action_id),
+            act.verb,
+            act.summary
+        ),
+        Event::AdvisoryRaised(advisory) => format!(
+            "{} {} from {}",
+            retrieval::record_number(&advisory.action_id),
+            advisory.kind,
+            advisory.tool
+        ),
+        Event::ReflectCounterUpdated(reflect) => {
+            format!("{}/{}", reflect.count, reflect.threshold)
+        }
+        Event::Pipeline(pipeline) => match &**pipeline {
+            Pipeline::Started { pipeline_name, .. }
+            | Pipeline::TokensUpdated { pipeline_name, .. }
+            | Pipeline::Completed { pipeline_name, .. }
+            | Pipeline::Failed { pipeline_name, .. } => pipeline_name.clone(),
+            Pipeline::TransitionFired {
+                pipeline_name,
+                transition_name,
+                ..
+            }
+            | Pipeline::TransitionCompleted {
+                pipeline_name,
+                transition_name,
+                ..
+            } => format!("{pipeline_name} {transition_name}"),
+        },
         Event::Other => String::new(),
         Event::Unreadable(error) => format!("unreadable: {error}"),
-    };
+    }
+}
+
+/// One line for `--log-events`: the event, what it did, and the counts
+/// after it.
+pub fn event_line(
+    seq: Option<u64>,
+    envelope: &Envelope,
+    outcome: &Outcome,
+    counts: (usize, usize),
+    applied: usize,
+) -> String {
+    let subject = event_subject(&envelope.event);
     let did = match outcome {
         Outcome::Applied(what) => what.clone(),
         Outcome::Unchanged(why) => format!("unchanged, {why}"),
@@ -692,6 +813,11 @@ mod tests {
                 graphs: vec!["test".into()],
                 active_graph: "test".into(),
                 backend: "surrealdb".into(),
+                reflect: crate::hub::Reflect {
+                    count: 4,
+                    threshold: 10,
+                    suggested: false,
+                },
             },
             purpose: Purpose::Switch,
             map: None,
@@ -743,6 +869,7 @@ mod tests {
                 event_type: event_type.into(),
                 session_id: SESSION.into(),
                 graph: "test".into(),
+                timestamp: "2026-11-07T10:00:00Z".into(),
                 event,
             }),
         })
@@ -886,6 +1013,7 @@ mod tests {
                     event_type: "retrieval_recorded".into(),
                     session_id: session.into(),
                     graph: "test".into(),
+                    timestamp: "2026-11-07T10:00:00Z".into(),
                     event: Event::RetrievalRecorded(Box::new(record(n, "test", Some(&["a"])))),
                 }),
             })
@@ -917,6 +1045,7 @@ mod tests {
                 event_type: "retrieval_recorded".into(),
                 session_id: SESSION.into(),
                 graph: "test".into(),
+                timestamp: "2026-11-07T10:00:00Z".into(),
                 event: Event::Unreadable("missing field `retrieved`".into()),
             }),
         });
@@ -925,6 +1054,79 @@ mod tests {
         assert!(
             refetches(&mut app).is_empty(),
             "a record that does not read changes nothing drawn, so nothing is read again"
+        );
+    }
+
+    #[test]
+    fn a_store_appears_in_the_log_with_its_advisories_in_the_update_it_arrives() {
+        use crate::event_log::tests::{act, advisory, pipeline};
+        let (mut app, items, _commands) = app(&small());
+        app.init_resource::<Log>().init_resource::<ReflectCounter>();
+        items.send(Item::Connected { connection: 1 }).unwrap();
+        let from = |seq, mut envelope: Envelope, session: &str| {
+            envelope.session_id = session.into();
+            Item::Message(Message::Event {
+                seq: Some(seq),
+                envelope: Box::new(envelope),
+            })
+        };
+        let reflect = |graph: &str, count| Envelope {
+            event_type: "reflect_counter_updated".into(),
+            session_id: SESSION.into(),
+            graph: graph.into(),
+            timestamp: "2026-11-07T10:00:00Z".into(),
+            event: Event::ReflectCounterUpdated(Reflect {
+                count,
+                threshold: 10,
+                suggested: false,
+            }),
+        };
+        let fired = pipeline(Pipeline::TransitionFired {
+            pipeline_name: "store".into(),
+            transition_name: "embed".into(),
+            input_places: Vec::new(),
+        });
+        let mut broken = act(9, "test", &[]);
+        broken.event_type = "graph_action_recorded".into();
+        broken.event = Event::Unreadable("missing field `summary`".into());
+        for (seq, envelope, session) in [
+            (1, fired, SESSION),
+            (2, act(1, "test", &["fa"]), SESSION),
+            (3, advisory(2, "test", true), SESSION),
+            (4, advisory(3, "test", false), SESSION),
+            (5, reflect("test", 5), SESSION),
+            // The replay again, another session's act, another graph's
+            // counter, and an act that does not read.
+            (6, act(1, "test", &["fa"]), SESSION),
+            (7, act(4, "test", &[]), "someone-else"),
+            (8, reflect("games", 9), SESSION),
+            (9, broken, SESSION),
+        ] {
+            items.send(from(seq, envelope, session)).unwrap();
+        }
+        app.update();
+        let log = app.world().resource::<Log>();
+        assert_eq!(log.session, SESSION);
+        assert_eq!(
+            log.records.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["000000000001", "000000000002", "000000000003"]
+        );
+        assert_eq!(log.pipeline.len(), 1);
+        assert_eq!(
+            event_log::listed(log, SESSION, "test").len(),
+            4,
+            "the act, its advisories and the pipeline line, in the update they came"
+        );
+        assert_eq!(
+            reflect_counter::label(app.world().resource::<ReflectCounter>(), SESSION, "test").0,
+            "reflect 5/10"
+        );
+        let state = app.world().resource::<LiveState>();
+        assert_eq!((state.received, state.applied), (9, 0));
+        assert_eq!(discs(&mut app), 2);
+        assert!(
+            refetches(&mut app).is_empty(),
+            "nothing drawn depends on them, so nothing is read again"
         );
     }
 
@@ -943,7 +1145,7 @@ mod tests {
         items.send(other_session).unwrap();
         items.send(other_graph).unwrap();
         items
-            .send(message(3, Event::Other, "transition_fired"))
+            .send(message(3, Event::Other, "embedding_stored"))
             .unwrap();
         items
             .send(message(

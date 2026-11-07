@@ -1,0 +1,14 @@
+{
+  "event_type": "transition_completed",
+  "category": "pipeline",
+  "graph": "",
+  "session_id": "5e55e55e000040008000000000000001",
+  "timestamp": "2026-10-20T18:02:11.050000Z",
+  "pipeline_name": "store",
+  "transition_name": "embed",
+  "output_places": [
+    "embedded"
+  ],
+  "duration_ms": 148.25,
+  "seq": 17
+}

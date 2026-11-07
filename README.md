@@ -83,6 +83,7 @@ In the window:
 | `L` | Show or hide every claim-to-claim edge between visible nodes, the edge toggle |
 | `C` | Switch the time axis between recorded time and claim time |
 | `P` | Show or hide the side panel |
+| `J` | Show the log of acts, advisories and pipeline runs in the side panel, or return the panel to the focused node |
 | `B` | Focus the node focused before this one, back along the focus history |
 | `/` | Type into the search field, which then takes the keyboard |
 | `Enter`, in the search field | Focus the next hit |
@@ -283,6 +284,8 @@ Along the top of the window, left to right:
 |---|---|
 | Session, Graph | Pick a session the hub lists, by its short id, backend and active graph, and one of its graphs; a disconnected session is shown and cannot be picked. Picking a graph loads its snapshot in the background, keeps the kinds, metacontexts and dim or hide, and drops the topic, time window and source, which named things in the old graph. A load that fails says why at the end of the bar and leaves the graph drawn. |
 | Stream | How the event stream stands: connected, with the messages received and the events applied; reconnecting, with the last error; or reading the graph again. |
+| reflect | The graph drawn's reflect counter, `reflect N/M`: stores since its last reflect against the count at which reflect is suggested, with "suggested" once it is. A graph the session is not on shows `reflect -`, since the hub reports the active graph's only. |
+| Log | Shows the log in the side panel in place of the focused node, and again returns to the node; `J` does the same. The log lists the session's acts and advisories of the graph drawn and its pipeline runs, newest first, filtered by kind, and a click on a node an entry names focuses it. |
 | Time | Recorded time or claim time; `C` does the same. |
 | Metacontexts | A checkbox for each of the graph's metacontexts, and All. |
 | Kinds | Topics, facts and inferences, each on or off. |
@@ -385,10 +388,11 @@ node keeps its place and the axes their scale, and the focus, the hover,
 the filter, the time mode and the camera are kept wherever what they name
 is still in the graph. Events that arrive meanwhile are held and applied
 after it. The stream tries a lost connection again after half a second,
-doubling up to ten seconds. Events for another session or graph, and the
-events this client does not draw (the pipeline events, the acts, the
-advisories and the retrieval records the hub replays on subscribe), are
-received and dropped.
+doubling up to ten seconds. The acts, advisories and pipeline events go
+to the log, the retrieval records to the Retrieval picker and the reflect
+counter to the bar, each as it comes, the replay's among them, without
+changing anything drawn. Events for another session or graph, and the
+events this client does not use, are received and dropped.
 
 ### Filters from the command line
 
@@ -411,7 +415,8 @@ reason, since it is more likely mistyped than meant.
 
 `--ui-state` sets how the bar starts: `open`, the default, `collapsed`, or
 with a picker's list open, `sessions`, `graphs`, `metacontexts`, `sources`,
-`topics`, or `topics:PREFIX` with `PREFIX` typed into the topic field.
+`retrievals`, `topics`, or `topics:PREFIX` with `PREFIX` typed into the
+topic field; `log` starts with the log in the side panel.
 
 A few options exist so a change can be checked with nobody at the window:
 `--screenshot PATH` saves a PNG of the view `--preset` names, with the bar

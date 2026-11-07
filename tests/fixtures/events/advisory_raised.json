@@ -1,0 +1,24 @@
+{
+  "event_type": "advisory_raised",
+  "category": "graph",
+  "graph": "fixture",
+  "session_id": "5e55e55e000040008000000000000001",
+  "timestamp": "2026-10-20T18:02:11.204000Z",
+  "action_id": "000000000032",
+  "tool": "store_decomposition",
+  "kind": "tag_joined_topic",
+  "message": "The tag 'swifts' was filed under 'swifts', a topic node not created from a tag. A tag and a topic of one name are one topic node.",
+  "subjects": [
+    "1fe00000-0000-4000-8000-000000000001",
+    "fac70000-0000-4000-8000-000000000003"
+  ],
+  "detail": {
+    "tag": "swifts",
+    "described_as": "the birds"
+  },
+  "action": "flag",
+  "surfaced": false,
+  "notify_user": true,
+  "judged_by": "a9e00000-0000-4000-8000-000000000001",
+  "seq": 5
+}

@@ -35,6 +35,9 @@ pub const TEXT: Color = Color::srgb(0.87, 0.89, 0.93);
 pub const CAPTION: Color = Color::srgb(0.52, 0.57, 0.67);
 pub const FAINT: Color = Color::srgb(0.4, 0.43, 0.5);
 pub const ERROR: Color = Color::srgb(1.0, 0.5, 0.45);
+/// The tint of a row that asks for a person, such as an advisory the agent
+/// was asked to raise with the user.
+pub const NOTIFY: Color = Color::srgba(1.0, 0.5, 0.45, 0.14);
 
 /// The size of every text in the bar, in logical pixels.
 pub const FONT_SIZE: f32 = 13.0;

@@ -1,0 +1,13 @@
+{
+  "event_type": "tokens_updated",
+  "category": "pipeline",
+  "graph": "",
+  "session_id": "5e55e55e000040008000000000000001",
+  "timestamp": "2026-10-20T18:02:11.051000Z",
+  "pipeline_name": "store",
+  "place_token_counts": {
+    "claims": 0,
+    "embedded": 3
+  },
+  "seq": 18
+}

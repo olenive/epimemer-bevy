@@ -41,6 +41,13 @@
 //! when they change: on a change of focus, of the filter, of the time mode,
 //! or of the graph, which the event stream changes in place (`apply.rs`).
 //!
+//! In place of the node the panel shows the log while [`LogOpen`] says so
+//! (`event_log.rs`): `J` or the bar's Log button shows it, in a panel
+//! collapsed or not, and returns to the node; five buttons under the
+//! panel's heading filter it by kind ([`LogKind`]), and each subject an
+//! entry names is a node reference whose click focuses that node and
+//! leaves the log open.
+//!
 //! The panel is collapsible, by its Hide button or `P`, to a button that
 //! brings it back. It scrolls with the wheel, takes the pointer as the bar
 //! does, so that nothing beneath it is hovered or clicked (`ui_focus.rs`),
@@ -49,6 +56,7 @@
 
 use std::collections::BTreeMap;
 
+use bevy::ecs::spawn::SpawnIter;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::text::LineBreak;
@@ -60,15 +68,17 @@ use crate::bar::style;
 use crate::camera::{BarCover, PanelCover};
 use crate::clip::{beyond_line, clip_note, is_clipped};
 use crate::edge_index::{EdgeIndex, End};
+use crate::event_log::{LOG_KINDS, Log, LogContext, LogKind, LogOpen, log_lines, toggle_log};
 use crate::filter::{Filter, RefreshShown, Shown, is_visible};
 use crate::focus::{Focus, FocusHistory, GoBack, back_target};
 use crate::graph_index::GraphIndex;
 use crate::hub::{NodeType, NodeView, parse_timestamp};
-use crate::keys::{BACK_KEY, PANEL_KEY};
+use crate::keys::{BACK_KEY, LOG_KEY, PANEL_KEY};
 use crate::labels::label_text;
 use crate::layout::{Filing, Kind};
 use crate::pickers::{Pickers, short_id};
 use crate::relayout::MapState;
+use crate::reload::Catalogue;
 use crate::retrieval;
 use crate::time_axis::{
     Linked, Placement, TimeMode, TimeModel, Validity, bound_text, date, line_text, reason_text,
@@ -119,6 +129,26 @@ pub enum Line {
     Detail(String),
     /// The tray's heading, whose click opens and closes its list.
     TrayHeading(String),
+    /// A log entry's row: when, its kind and its words; `marked` for an
+    /// advisory the agent was asked to raise with a person.
+    Entry {
+        time: String,
+        kind: String,
+        text: String,
+        marked: bool,
+    },
+    /// A row of node references under the line before.
+    Refs(Vec<NodeRef>),
+}
+
+/// A node named in a row of references: a click focuses it where there is
+/// one. Faint for a node the filter hides or one the graph drawn does not
+/// hold.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NodeRef {
+    pub text: String,
+    pub node: Option<usize>,
+    pub faint: bool,
 }
 
 /// Whether the panel is collapsed to its button.
@@ -140,6 +170,13 @@ pub struct NodeLines(pub Vec<Line>);
 /// The tray's lines, while claim time is drawn.
 #[derive(Resource, Clone, Debug, Default, PartialEq)]
 pub struct TrayLines(pub Vec<Line>);
+
+/// The log's title and lines, while it is open.
+#[derive(Resource, Clone, Debug, Default, PartialEq)]
+pub struct LogLines {
+    pub title: String,
+    pub lines: Vec<Line>,
+}
 
 /// The panel's outer node, the full height of the window below the bar.
 #[derive(Component)]
@@ -169,6 +206,22 @@ struct NodeBlock;
 #[derive(Component)]
 struct TrayBlock;
 
+/// What holds the node's block and the tray's, shown while the log is not.
+#[derive(Component)]
+struct NodeSide;
+
+/// The block of the log's lines.
+#[derive(Component)]
+struct LogBlock;
+
+/// The row of the log's kind buttons, under the heading.
+#[derive(Component)]
+struct LogKinds;
+
+/// A node reference in a row of them, which has a button's colour at rest.
+#[derive(Component)]
+struct Chip;
+
 /// The button the panel collapses to.
 #[derive(Component)]
 struct PanelStrip;
@@ -181,6 +234,8 @@ enum PanelControl {
     Expand,
     ToggleTray,
     Focus(usize),
+    /// One of the log's kind buttons.
+    Kind(LogKind),
 }
 
 pub struct PanelPlugin;
@@ -201,6 +256,10 @@ impl Plugin for PanelPlugin {
             .init_resource::<Tray>()
             .init_resource::<TrayOpen>()
             .init_resource::<Shown>()
+            .init_resource::<Log>()
+            .init_resource::<LogKind>()
+            .init_resource::<LogOpen>()
+            .init_resource::<LogLines>()
             .add_message::<GoBack>()
             .add_observer(on_click)
             .add_systems(Startup, spawn_panel)
@@ -209,9 +268,12 @@ impl Plugin for PanelPlugin {
                 PostUpdate,
                 (
                     refresh_lines,
+                    refresh_log,
                     show_header,
                     show_node_lines,
                     show_tray_lines,
+                    show_log,
+                    show_log_lines,
                     show_collapsed,
                     place_below_bar,
                 )
@@ -1010,6 +1072,77 @@ fn spawn_line(commands: &mut Commands, parent: Entity, line: &Line) {
                 children![wrapped(words.clone(), style::ACCENT)],
             ));
         }
+        Line::Entry {
+            time,
+            kind,
+            text,
+            marked,
+        } => {
+            let tint = if *marked { style::NOTIFY } else { style::ROW };
+            let row = commands
+                .spawn((
+                    Node {
+                        margin: UiRect::top(px(4)),
+                        ..row_node()
+                    },
+                    BackgroundColor(tint),
+                    ChildOf(parent),
+                ))
+                .id();
+            let words = commands
+                .spawn((wrapped(String::new(), style::TEXT), ChildOf(row)))
+                .id();
+            commands.spawn((span(format!("{time}  "), style::CAPTION), ChildOf(words)));
+            if *marked {
+                commands.spawn((span("notify user  ", style::ERROR), ChildOf(words)));
+            }
+            commands.spawn((span(format!("{kind}  "), style::ACCENT), ChildOf(words)));
+            commands.spawn((span(text.clone(), style::TEXT), ChildOf(words)));
+        }
+        Line::Refs(refs) => {
+            let row = commands
+                .spawn((
+                    Node {
+                        width: percent(100),
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: px(4),
+                        row_gap: px(2),
+                        padding: UiRect {
+                            left: px(18),
+                            right: px(4),
+                            top: px(1),
+                            bottom: px(0),
+                        },
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                    ChildOf(parent),
+                ))
+                .id();
+            for reference in refs {
+                let colour = if reference.faint {
+                    style::FAINT
+                } else {
+                    style::TEXT
+                };
+                let mut chip = commands.spawn((
+                    Chip,
+                    Node {
+                        max_width: percent(100),
+                        padding: UiRect::axes(px(4), px(1)),
+                        border_radius: BorderRadius::all(px(2)),
+                        ..default()
+                    },
+                    BackgroundColor(style::BUTTON),
+                    ChildOf(row),
+                ));
+                if let Some(node) = reference.node {
+                    chip.insert((Button, PanelControl::Focus(node)));
+                }
+                let chip = chip.id();
+                commands.spawn((wrapped(reference.text.clone(), colour), ChildOf(chip)));
+            }
+        }
     }
 }
 
@@ -1024,7 +1157,7 @@ fn header_button(words: String, control: PanelControl) -> impl Bundle {
     )
 }
 
-fn spawn_panel(mut commands: Commands, collapsed: Res<PanelCollapsed>) {
+fn spawn_panel(mut commands: Commands, collapsed: Res<PanelCollapsed>, log: Res<LogOpen>) {
     let display = |shown: bool| if shown { Display::Flex } else { Display::None };
     commands.spawn((
         PanelRoot,
@@ -1090,6 +1223,26 @@ fn spawn_panel(mut commands: Commands, collapsed: Res<PanelCollapsed>) {
                         ],
                     ),
                     (
+                        LogKinds,
+                        Node {
+                            display: display(log.0),
+                            flex_wrap: FlexWrap::Wrap,
+                            column_gap: px(4),
+                            row_gap: px(4),
+                            padding: UiRect {
+                                left: px(6),
+                                right: px(6),
+                                top: px(0),
+                                bottom: px(6),
+                            },
+                            flex_shrink: 0.0,
+                            ..default()
+                        },
+                        Children::spawn(SpawnIter(LOG_KINDS.iter().map(|&(kind, words)| {
+                            header_button(words.to_owned(), PanelControl::Kind(kind))
+                        }))),
+                    ),
+                    (
                         PanelBody,
                         Node {
                             flex_direction: FlexDirection::Column,
@@ -1110,20 +1263,41 @@ fn spawn_panel(mut commands: Commands, collapsed: Res<PanelCollapsed>) {
                         ScrollArea,
                         children![
                             (
-                                NodeBlock,
+                                NodeSide,
                                 Node {
+                                    display: display(!log.0),
                                     flex_direction: FlexDirection::Column,
-                                    row_gap: px(1),
                                     flex_shrink: 0.0,
                                     ..default()
                                 },
+                                children![
+                                    (
+                                        NodeBlock,
+                                        Node {
+                                            flex_direction: FlexDirection::Column,
+                                            row_gap: px(1),
+                                            flex_shrink: 0.0,
+                                            ..default()
+                                        },
+                                    ),
+                                    (
+                                        TrayBlock,
+                                        Node {
+                                            flex_direction: FlexDirection::Column,
+                                            row_gap: px(1),
+                                            margin: UiRect::top(px(10)),
+                                            flex_shrink: 0.0,
+                                            ..default()
+                                        },
+                                    ),
+                                ],
                             ),
                             (
-                                TrayBlock,
+                                LogBlock,
                                 Node {
+                                    display: display(log.0),
                                     flex_direction: FlexDirection::Column,
                                     row_gap: px(1),
-                                    margin: UiRect::top(px(10)),
                                     flex_shrink: 0.0,
                                     ..default()
                                 },
@@ -1147,19 +1321,22 @@ fn spawn_panel(mut commands: Commands, collapsed: Res<PanelCollapsed>) {
     ));
 }
 
-/// Shows the title, and Back as waiting while there is nowhere to go back
-/// to.
+/// Shows the title, the log's while it is open, and Back as waiting while
+/// there is nowhere to go back to.
 fn show_header(
     header: Res<PanelHeader>,
+    open: Res<LogOpen>,
+    log: Res<LogLines>,
     mut titles: Query<&mut Text, With<PanelTitle>>,
     mut back: Query<&mut TextColor, With<BackWords>>,
 ) {
-    if !header.is_changed() {
+    if !header.is_changed() && !open.is_changed() && !log.is_changed() {
         return;
     }
+    let title = if open.0 { &log.title } else { &header.title };
     for mut text in &mut titles {
-        if text.0 != header.title {
-            text.0.clone_from(&header.title);
+        if text.0 != *title {
+            text.0.clone_from(title);
         }
     }
     let colour = if header.back {
@@ -1226,6 +1403,94 @@ fn show_tray_lines(
     }
 }
 
+/// What the log's lines are worked out from.
+#[derive(SystemParam)]
+struct LogSources<'w> {
+    open: Res<'w, LogOpen>,
+    log: Res<'w, Log>,
+    kind: Res<'w, LogKind>,
+    shown: Res<'w, Shown>,
+    index: Option<Res<'w, GraphIndex>>,
+    catalogue: Option<Res<'w, Catalogue>>,
+}
+
+/// Works the log's lines out again while it is open and anything they show
+/// changed: the log, its kind filter, the graph drawn or what is visible.
+fn refresh_log(sources: LogSources, mut lines: ResMut<LogLines>) {
+    if !sources.open.0 {
+        return;
+    }
+    let changed = sources.open.is_changed()
+        || sources.log.is_changed()
+        || sources.kind.is_changed()
+        || sources.shown.is_changed()
+        || sources.index.as_ref().is_some_and(|i| i.is_changed())
+        || sources.catalogue.as_ref().is_some_and(|c| c.is_changed());
+    if !changed {
+        return;
+    }
+    let empty = GraphIndex::default();
+    let (session, graph) = sources.catalogue.as_deref().map_or(("", ""), |c| {
+        (c.session.session_id.as_str(), c.graph.as_str())
+    });
+    let (title, log) = log_lines(&LogContext {
+        log: &sources.log,
+        session,
+        graph,
+        kind: *sources.kind,
+        index: sources.index.as_deref().unwrap_or(&empty),
+        visible: &sources.shown.visible,
+    });
+    lines.set_if_neq(LogLines { title, lines: log });
+}
+
+/// What `show_log` shows or hides: the node's side, and the log's block
+/// and kind buttons.
+type LogParts = Or<(With<NodeSide>, With<LogBlock>, With<LogKinds>)>;
+
+/// Shows the log and its kind buttons or the node, and starts the panel at
+/// its top when that changes or the kind does.
+fn show_log(
+    open: Res<LogOpen>,
+    kind: Res<LogKind>,
+    mut parts: Query<(&mut Node, Has<NodeSide>), LogParts>,
+    mut body: Query<&mut ScrollPosition, With<PanelBody>>,
+) {
+    if !open.is_changed() && !kind.is_changed() {
+        return;
+    }
+    for mut scroll in &mut body {
+        if scroll.0 != Vec2::ZERO {
+            scroll.0 = Vec2::ZERO;
+        }
+    }
+    for (mut node, node_side) in &mut parts {
+        let shown = if node_side { !open.0 } else { open.0 };
+        let display = if shown { Display::Flex } else { Display::None };
+        if node.display != display {
+            node.display = display;
+        }
+    }
+}
+
+/// Draws the log's lines again when they change.
+fn show_log_lines(
+    mut commands: Commands,
+    lines: Res<LogLines>,
+    block: Single<(Entity, Option<&Children>), With<LogBlock>>,
+) {
+    if !lines.is_changed() {
+        return;
+    }
+    let (block, children) = block.into_inner();
+    for child in children.into_iter().flatten() {
+        commands.entity(*child).despawn();
+    }
+    for line in &lines.lines {
+        spawn_line(&mut commands, block, line);
+    }
+}
+
 /// Shows the panel or the button it collapses to.
 fn show_collapsed(
     collapsed: Res<PanelCollapsed>,
@@ -1285,30 +1550,44 @@ fn measure_cover(
     }
 }
 
-/// `P` shows or hides the panel, unless a text field has the keyboard.
+/// `P` shows or hides the panel, and `J` shows the log in it or returns it
+/// to the node, unless a text field has the keyboard.
 fn toggle_on_key(
     keys: Res<ButtonInput<KeyCode>>,
     ui: Res<UiFocus>,
     mut collapsed: ResMut<PanelCollapsed>,
+    mut open: ResMut<LogOpen>,
 ) {
-    if !ui.typing && keys.just_pressed(PANEL_KEY.0) {
+    if ui.typing {
+        return;
+    }
+    if keys.just_pressed(PANEL_KEY.0) {
         collapsed.0 = !collapsed.0;
+    }
+    if keys.just_pressed(LOG_KEY.0) {
+        let (log, folded) = toggle_log(open.0, collapsed.0);
+        open.set_if_neq(LogOpen(log));
+        collapsed.set_if_neq(PanelCollapsed(folded));
     }
 }
 
 /// Colours the panel's buttons and rows by whether they are under the
-/// pointer, and Back by whether it has somewhere to go.
+/// pointer, the log's kind buttons by which is chosen, and Back by whether
+/// it has somewhere to go.
 fn style_controls(
     header: Res<PanelHeader>,
-    mut controls: Query<(&PanelControl, &Interaction, &mut BackgroundColor)>,
+    kind: Res<LogKind>,
+    mut controls: Query<(&PanelControl, &Interaction, &mut BackgroundColor, Has<Chip>)>,
 ) {
-    for (control, interaction, mut background) in &mut controls {
+    for (control, interaction, mut background, chip) in &mut controls {
         let rest = match control {
-            PanelControl::Focus(_) | PanelControl::ToggleTray => style::ROW,
+            PanelControl::Focus(_) | PanelControl::ToggleTray if !chip => style::ROW,
             _ => style::BUTTON,
         };
         let waiting = *control == PanelControl::Back && !header.back;
-        let colour = style::button_colour(rest, false, *interaction != Interaction::None, waiting);
+        let selected = *control == PanelControl::Kind(*kind);
+        let colour =
+            style::button_colour(rest, selected, *interaction != Interaction::None, waiting);
         background.set_if_neq(BackgroundColor(colour));
     }
 }
@@ -1321,6 +1600,7 @@ fn on_click(
     mut collapsed: ResMut<PanelCollapsed>,
     mut open: ResMut<TrayOpen>,
     mut focus: ResMut<Focus>,
+    mut kind: ResMut<LogKind>,
     mut back: MessageWriter<GoBack>,
 ) {
     if click.button != PointerButton::Primary {
@@ -1340,6 +1620,9 @@ fn on_click(
         PanelControl::Focus(node) => {
             focus.set_if_neq(Focus(Some(node)));
         }
+        PanelControl::Kind(chosen) => {
+            kind.set_if_neq(chosen);
+        }
     }
 }
 
@@ -1354,7 +1637,7 @@ mod tests {
 
     use super::*;
     use crate::graph_index::tests::{edge, node};
-    use crate::hub::{ImpreciseInstant, ValidityInterval, parse_snapshot};
+    use crate::hub::{ImpreciseInstant, SessionInfo, ValidityInterval, parse_snapshot};
     use crate::layout::place;
     use crate::time_axis::{ModeTimes, Profile, Span, Unplaced};
 
@@ -1863,6 +2146,105 @@ mod tests {
             .drain()
             .count();
         assert_eq!(asked, 1);
+    }
+
+    fn press(app: &mut App, key: KeyCode) {
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(key);
+        app.update();
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.release(key);
+        keys.clear();
+    }
+
+    fn title(app: &mut App) -> String {
+        let mut titles = app.world_mut().query_filtered::<&Text, With<PanelTitle>>();
+        titles.single(app.world()).unwrap().0.clone()
+    }
+
+    fn shown<C: Component>(app: &mut App) -> bool {
+        let mut nodes = app.world_mut().query_filtered::<&Node, With<C>>();
+        nodes.single(app.world()).unwrap().display == Display::Flex
+    }
+
+    #[test]
+    fn j_shows_the_log_in_place_of_the_node_and_a_subject_click_focuses_it() {
+        use crate::event_log::tests::{act, advisory};
+        let mut app = app();
+        let session = SessionInfo {
+            session_id: "s".into(),
+            pid: 1,
+            backend: "surrealdb".into(),
+            active_graph: "g".into(),
+            started_at: "2026-11-07T10:00:00Z".into(),
+            connected: true,
+            last_event_at: None,
+            schema_version: Some(1),
+        };
+        app.insert_resource(Catalogue {
+            hub: "127.0.0.1:1".into(),
+            sessions: vec![session.clone()],
+            session,
+            graph: "g".into(),
+            browsing: "s".into(),
+            graphs: None,
+        });
+        let fact_id = "fac70000-0000-4000-8000-000000000001";
+        let fact = app.world().resource::<GraphIndex>().by_id[fact_id];
+        let mut log = Log::default();
+        crate::event_log::remember(&mut log, &act(1, "g", &[fact_id, "gone"]));
+        crate::event_log::remember(&mut log, &advisory(2, "g", true));
+        app.insert_resource(log);
+        app.update();
+        assert!(shown::<NodeSide>(&mut app) && !shown::<LogKinds>(&mut app));
+
+        press(&mut app, LOG_KEY.0);
+        assert!(app.world().resource::<LogOpen>().0);
+        assert_eq!(title(&mut app), "Log: 2 entries");
+        assert!(shown::<LogBlock>(&mut app) && shown::<LogKinds>(&mut app));
+        assert!(!shown::<NodeSide>(&mut app));
+        let marked = app
+            .world()
+            .resource::<LogLines>()
+            .lines
+            .iter()
+            .filter(|l| matches!(l, Line::Entry { marked: true, .. }))
+            .count();
+        assert_eq!(marked, 1, "the advisory with notify_user set");
+
+        // A subject's reference focuses its node and leaves the log open.
+        let chip = rows(&mut app)
+            .into_iter()
+            .find(|(_, c)| *c == PanelControl::Focus(fact))
+            .map(|(e, _)| e)
+            .expect("the act's subject, as a reference");
+        let words = app.world().get::<Children>(chip).unwrap()[0];
+        click(&mut app, words);
+        assert_eq!(app.world().resource::<Focus>().0, Some(fact));
+        assert!(app.world().resource::<LogOpen>().0);
+        assert_eq!(title(&mut app), "Log: 2 entries");
+
+        let notify = rows(&mut app)
+            .into_iter()
+            .find(|(_, c)| *c == PanelControl::Kind(LogKind::Notify))
+            .unwrap()
+            .0;
+        click(&mut app, notify);
+        assert_eq!(*app.world().resource::<LogKind>(), LogKind::Notify);
+        assert_eq!(title(&mut app), "Log: 1 of 2 entries");
+
+        // P hides the panel with the log in it, and J brings it back on the
+        // log; J again returns to the node.
+        press(&mut app, PANEL_KEY.0);
+        assert!(app.world().resource::<PanelCollapsed>().0);
+        press(&mut app, LOG_KEY.0);
+        assert!(!app.world().resource::<PanelCollapsed>().0);
+        assert!(app.world().resource::<LogOpen>().0);
+        press(&mut app, LOG_KEY.0);
+        assert!(!app.world().resource::<LogOpen>().0);
+        assert_eq!(title(&mut app), "Focused fact");
+        assert!(shown::<NodeSide>(&mut app) && !shown::<LogBlock>(&mut app));
     }
 
     #[test]

@@ -264,9 +264,13 @@ pub fn apply(picture: &mut Picture, event: &Event, changes: &mut Changes) -> Out
         Event::EdgeStored(edge) => edge_stored(picture, edge, changes),
         Event::NodeStatusChanged(change) => status_changed(picture, change, changes),
         Event::TimelineStored(timeline) => timeline_stored(picture, timeline, changes),
-        Event::GraphSwitched { .. } | Event::RetrievalRecorded(_) | Event::Other => {
-            Outcome::Unchanged("nothing drawn depends on it".into())
-        }
+        Event::GraphSwitched { .. }
+        | Event::RetrievalRecorded(_)
+        | Event::ActRecorded(_)
+        | Event::AdvisoryRaised(_)
+        | Event::ReflectCounterUpdated(_)
+        | Event::Pipeline(_)
+        | Event::Other => Outcome::Unchanged("nothing drawn depends on it".into()),
         Event::Unreadable(error) => {
             Outcome::Refetch(format!("an event that does not read: {error}"))
         }

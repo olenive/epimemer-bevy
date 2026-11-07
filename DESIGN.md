@@ -5,7 +5,7 @@ Epimemer repository and moved here the day this repository was created;
 this file is the design's only home. Slices 1 to 10 of §14 are built
 (2026-10-21), slice 11 waits on its Petritype prerequisites, and slices 12
 to 15 were added on 2026-11-07, when the owner decided this client replaces
-the dashboard (§1); slice 12 was built the same day. The numbers in §3 were measured on the development graph
+the dashboard (§1); slices 12 and 13 were built the same day. The numbers in §3 were measured on the development graph
 on 2026-10-18, through the hub described in `VIZ_CONTRACT.md`, which is the
 only surface this client depends on. `VIZ_CONTRACT.md` throughout means
 `dev-docs/VIZ_CONTRACT.md` in the Epimemer repository.
@@ -514,6 +514,7 @@ The set is fixed; a filter not on this list is a design change:
 | Presets | The cameras of §6. |
 | Recalculate layout | §7. |
 | Side panel | The focused node in full, its edges by class, its timepoints, its validity brackets, and the connectors' far ends by name. |
+| Log | The session's acts, advisories and pipeline runs, newest first, filtered by kind, in place of the side panel's node (slice 13). |
 
 Filtering dims rather than removes by default (§8), with a "hide" variant
 for when the user wants the filtered-out nodes gone from the budget and the
@@ -555,6 +556,47 @@ absent, at 62 to 64 frames a second as before; a `segment` record, which
 declares nothing, changed nothing shown; and a `store_decomposition` that
 declared an empty list hid every node in Hide mode.
 
+The log (slice 13). `J`, or the bar's Log button, shows the log in
+place of the side panel's node, at the panel's width, so the scene keeps
+the share of the window it has beside the panel; `J` or Log again returns
+to the node, `P` hides the panel either way, and `J` with the panel hidden
+shows it on the log. `L`, for log, is the edge
+toggle, so the key is `J`, for journal. The log lists the acts and
+advisories of the graph drawn and the pipeline lines, which name no
+graph, newest first: an act or an advisory by its `action_id`, the
+position the contract gives, and a pipeline line after the act or advisory
+held last when it came, in the order the lines came. An entry is one row:
+its time in UTC, under a heading for each day; its kind, which is an act's
+verb, an advisory's kind or a pipeline's name; and its words, an act's
+summary, an advisory's tool and message, or the pipeline line. A fainter
+row under it gives an act's counts and an advisory's action and whether
+the agent was shown it, each as the string the hub sent, and who judged.
+The subjects follow as the panel's node references, at most twelve, and a
+click on one focuses that node and leaves the log open; a subject the
+graph drawn does not hold is named by its short id and cannot be clicked.
+An advisory with `notify_user` set says so in red after its time, on a
+tinted row.
+Five buttons above the list filter it: All, Acts, Advisories, Pipelines,
+and Notify user, the advisories with `notify_user` set. The client keeps
+512 acts and advisories, as many as the hub's ring holds, and 512 pipeline
+lines, counted apart so that a busy pipeline cannot push the acts out, and
+the log lists the newest 200 that pass, as the panel lists 200 edges. An
+entry is kept once by its `action_id`, for the session followed across
+switches of graph, and the log is emptied on a switch to another session,
+since ids are counted per session. `--ui-state log` opens it from the
+start.
+
+The reflect counter (slice 13). The bar shows `reflect N/M`: the stores
+since the last reflect against the threshold at which reflect is
+suggested, followed by "suggested", in the accent colour, while the hub
+says it is. The graph list's `reflect` describes the session's active
+graph, so each graph list of the session drawn that comes, on connect, on
+a switch, on a read again and when the graph picker opens, sets the
+counter of that graph, and `reflect_counter_updated` sets the counter of
+the graph it names. The bar shows the counter while it is the graph
+drawn's, and `reflect -` for a graph the session is not on, whose counter
+the hub does not report.
+
 What the build settled (slice 9, checked on the development graph on
 2026-10-20). The panel is 380 logical pixels wide with 8 around it,
 nearly a third of the default 1280 by 720 window, so every view is fitted, and
@@ -592,14 +634,32 @@ The client fetches the snapshot once and then applies the `/ws` stream:
 | `timeline_stored` | Replace the timeline; recompute the claim-time columns that reference it. |
 | `graph_switched` | Nothing by itself; the session's `active_graph` changes and the client shows whichever graph it was asked to. |
 | `retrieval_recorded` | Keep the record for the Retrieval picker (§10), once by its `record_id`; nothing drawn changes. |
+| `graph_action_recorded`, `advisory_raised` | Keep the entry for the log (§10), once by its `action_id`; nothing drawn changes. |
+| `reflect_counter_updated` | Set the bar's reflect counter of the graph it names (§10). |
+| The six pipeline events | A line in the log, or a duration added to one (below). |
 | `session_connected`, `session_disconnected`, `session_dropped` | Update the session picker; a `session_connected` for the followed session refetches the snapshot, because events during the session's disconnection were dropped. |
 | A `seq` gap, or the client's own reconnect | Refetch the snapshot. |
 
-Pipeline events are ignored until slice 13 logs them and the activity bar
-draws them (§13, §14); the dashboard's pipeline strip is what shows them
-today. Replay on subscribe carries only acts, advisories and retrieval
-records. The records fill the Retrieval picker (§10); the acts and
-advisories are received and dropped until slice 13 logs them.
+Replay on subscribe carries only acts, advisories and retrieval records.
+The records fill the Retrieval picker and the acts and advisories the log
+(§10). Like the records, the acts, the advisories, the reflect counter and
+the pipeline events are taken as they come, even while a graph is being
+read, since none of them changes anything drawn, and a body among them
+that does not read is logged and dropped without reading the graph again.
+
+The log makes its pipeline lines from the events until the activity bar
+draws the runs (§13). `pipeline_started` is a line naming how many
+transitions and places its topology has; `transition_fired` is a line
+naming the transition, and the `transition_completed` that follows adds
+its duration to the oldest such line still without one, or makes a line
+of its own where the fire came before the client did; `pipeline_completed`
+and `pipeline_failed` are a line with how many transitions fired and how
+long the run took, and a failure names the transition and the error.
+`tokens_updated` makes no line. The events carry no run id, so a run
+already underway when the client connects shows from its next event,
+since the topology is not replayed, and two runs of one pipeline at once
+interleave their lines. The topology is parsed and kept on the event for
+the activity bar, and the log keeps only its counts.
 
 What the build settled (slice 8, 2026-10-20). The client subscribes before
 it reads the snapshot, so an event between the two waits in the stream's

@@ -1,0 +1,40 @@
+{
+  "event_type": "pipeline_started",
+  "category": "pipeline",
+  "graph": "",
+  "session_id": "5e55e55e000040008000000000000001",
+  "timestamp": "2026-10-20T18:02:10.800000Z",
+  "pipeline_name": "reflect",
+  "place_names": [
+    "start",
+    "after_topic_consolidation",
+    "after_pending_review"
+  ],
+  "transition_names": [
+    "topic_consolidation",
+    "pending_review"
+  ],
+  "edges": [
+    {
+      "source": "start",
+      "target": "topic_consolidation",
+      "label": null
+    },
+    {
+      "source": "topic_consolidation",
+      "target": "after_topic_consolidation",
+      "label": null
+    },
+    {
+      "source": "after_topic_consolidation",
+      "target": "pending_review",
+      "label": "pairs"
+    },
+    {
+      "source": "pending_review",
+      "target": "after_pending_review",
+      "label": null
+    }
+  ],
+  "seq": 16
+}

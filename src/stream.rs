@@ -21,11 +21,15 @@
 //!
 //! Parsing is a pure function, [`parse`], so that every message shape is
 //! checked on recorded JSON without a hub. The messages this client acts on
-//! are read into the contract's own structs (`hub.rs`), the retrieval
-//! records among them, which `live.rs` keeps for the Retrieval picker
-//! (`retrieval.rs`); every other event, the pipeline events, the acts, the
-//! advisories and any type added later, is [`Event::Other`], received and
-//! dropped. A
+//! are read into the contract's own structs (`hub.rs` and below): the graph
+//! events, the retrieval records, which `live.rs` keeps for the Retrieval
+//! picker (`retrieval.rs`), the acts, the advisories and the six pipeline
+//! events, which it keeps for the log (`event_log.rs`), and the reflect
+//! counter, which the bar shows (`reflect_counter.rs`). An act's verb, an
+//! advisory's kind and action, and the keys of a count are kept as the
+//! strings they arrive as, since the contract leaves them open. Any other
+//! event, such as the embedding, document and segment events and any type
+//! added later, is [`Event::Other`], received and dropped. A
 //! message's `seq` is kept whatever it is, since a gap in it means events
 //! were lost. The hub is plain `ws://` on loopback (VIZ_CONTRACT.md §2), so
 //! the native client has no TLS.
@@ -36,6 +40,7 @@
 //! That hub also sends `transition_enabled`, a pipeline event the contract
 //! no longer has; it is one more [`Event::Other`].
 
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::time::Duration;
@@ -46,7 +51,7 @@ use serde_json::{Map, Value};
 use web_time::Instant;
 
 use crate::background;
-use crate::hub::{EdgeView, NodeView, RetrievalRecord, SessionInfo, TimelineView};
+use crate::hub::{EdgeView, NodeView, Reflect, RetrievalRecord, SessionInfo, TimelineView};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
@@ -124,8 +129,10 @@ pub struct Envelope {
     pub event_type: String,
     /// The session that published it, stamped by the hub.
     pub session_id: String,
-    /// The graph it is about; empty on a few events.
+    /// The graph it is about; empty on the pipeline events and a few more.
     pub graph: String,
+    /// When the session made it, as the hub wrote it.
+    pub timestamp: String,
     pub event: Event,
 }
 
@@ -147,6 +154,15 @@ pub enum Event {
     },
     /// A tool answered: what it handed the agent.
     RetrievalRecorded(Box<RetrievalRecord>),
+    /// One act, at the transaction boundary that made it.
+    ActRecorded(Box<Act>),
+    /// A warning a tool computed, whether or not the agent was shown it.
+    AdvisoryRaised(Box<Advisory>),
+    /// A graph's reflect counter moved.
+    ReflectCounterUpdated(Reflect),
+    /// A pipeline run started, a transition fired or completed, its tokens
+    /// moved, or it ended.
+    Pipeline(Box<Pipeline>),
     /// An event this client receives and does not act on.
     Other,
     /// An event this client acts on whose body does not read: the shape
@@ -165,6 +181,126 @@ pub struct StatusChange {
     #[serde(default)]
     pub counterpart: Option<String>,
 }
+
+/// The body of `graph_action_recorded`: one act.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct Act {
+    /// Its place in the session's numbering, which the advisories share,
+    /// padded to twelve digits so that text order is numeric order.
+    pub action_id: String,
+    /// `stored`, `corrected`, `merged` and the rest, or the kind of a
+    /// timeline decision or a reopen.
+    pub verb: String,
+    /// The nodes it was about, or the timeline a decision was about.
+    pub subjects: Vec<String>,
+    /// What it swept up, such as `{"edges": 3, "nodes": 1}`.
+    pub counts: BTreeMap<String, i64>,
+    /// The act in words, as the session wrote it.
+    pub summary: String,
+    /// The judge the tool named, where it named one.
+    #[serde(default)]
+    pub judged_by: Option<String>,
+}
+
+/// The body of `advisory_raised`: a warning a tool computed.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct Advisory {
+    /// Its place in the session's numbering, which the acts share.
+    pub action_id: String,
+    /// The tool it came from, without the `epimemer.` prefix.
+    pub tool: String,
+    /// What kind of warning it is, such as `tag_joined_topic`.
+    pub kind: String,
+    /// The warning's own sentence, word for word.
+    pub message: String,
+    pub subjects: Vec<String>,
+    /// More about it, in a shape the contract does not promise.
+    pub detail: Map<String, Value>,
+    /// What the graph's policy says about this kind, such as `proceed`.
+    pub action: String,
+    /// Whether the agent's response carried it.
+    pub surfaced: bool,
+    /// Whether the agent was asked to raise it with a person.
+    pub notify_user: bool,
+    /// The judge the call named, where the graph requires one.
+    #[serde(default)]
+    pub judged_by: Option<String>,
+}
+
+/// An edge of a pipeline's topology, between a place and a transition.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct TopologyEdge {
+    pub source: String,
+    pub target: String,
+    /// The argument an input edge feeds, where it has one.
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+/// The six pipeline events (VIZ_CONTRACT.md §7.4), which describe the
+/// Petri nets a session runs. None carries a run id: a run is told by its
+/// pipeline's name alone.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(tag = "event_type")]
+pub enum Pipeline {
+    /// A run started, with the whole topology of its net.
+    #[serde(rename = "pipeline_started")]
+    Started {
+        pipeline_name: String,
+        place_names: Vec<String>,
+        transition_names: Vec<String>,
+        edges: Vec<TopologyEdge>,
+    },
+    /// A transition went in flight.
+    #[serde(rename = "transition_fired")]
+    TransitionFired {
+        pipeline_name: String,
+        transition_name: String,
+        input_places: Vec<String>,
+    },
+    /// A transition's body finished, after `duration_ms`.
+    #[serde(rename = "transition_completed")]
+    TransitionCompleted {
+        pipeline_name: String,
+        transition_name: String,
+        output_places: Vec<String>,
+        duration_ms: f64,
+    },
+    /// How many tokens each place holds now.
+    #[serde(rename = "tokens_updated")]
+    TokensUpdated {
+        pipeline_name: String,
+        place_token_counts: BTreeMap<String, i64>,
+    },
+    /// The run ended.
+    #[serde(rename = "pipeline_completed")]
+    Completed {
+        pipeline_name: String,
+        transitions_fired: u64,
+        duration_ms: f64,
+    },
+    /// The run ended by raising, in `transition_name` where one was
+    /// running.
+    #[serde(rename = "pipeline_failed")]
+    Failed {
+        pipeline_name: String,
+        error: String,
+        #[serde(default)]
+        transition_name: Option<String>,
+        transitions_fired: u64,
+        duration_ms: f64,
+    },
+}
+
+/// The event types of [`Pipeline`].
+pub const PIPELINE_EVENTS: [&str; 6] = [
+    "pipeline_started",
+    "transition_fired",
+    "transition_completed",
+    "tokens_updated",
+    "pipeline_completed",
+    "pipeline_failed",
+];
 
 #[derive(Deserialize)]
 struct Switched {
@@ -246,6 +382,18 @@ pub fn parse(text: &str) -> Message {
         "retrieval_recorded" => read(
             serde_json::from_value(field("record")).map(|r| Event::RetrievalRecorded(Box::new(r))),
         ),
+        "graph_action_recorded" => {
+            read(serde_json::from_value(value.clone()).map(|a| Event::ActRecorded(Box::new(a))))
+        }
+        "advisory_raised" => {
+            read(serde_json::from_value(value.clone()).map(|a| Event::AdvisoryRaised(Box::new(a))))
+        }
+        "reflect_counter_updated" => {
+            read(serde_json::from_value(value.clone()).map(Event::ReflectCounterUpdated))
+        }
+        kind if PIPELINE_EVENTS.contains(&kind) => {
+            read(serde_json::from_value(value.clone()).map(|p| Event::Pipeline(Box::new(p))))
+        }
         "graph_switched" => {
             read(
                 serde_json::from_value::<Switched>(value.clone()).map(|s| Event::GraphSwitched {
@@ -262,6 +410,7 @@ pub fn parse(text: &str) -> Message {
             event_type: event_type.to_owned(),
             session_id: text("session_id"),
             graph: text("graph"),
+            timestamp: text("timestamp"),
             event,
         }),
     }
@@ -643,23 +792,246 @@ mod tests {
     }
 
     #[test]
+    fn an_act_and_an_advisory_read_in_the_contract_shape() {
+        let (seq, act) = event("graph_action_recorded");
+        assert_eq!(seq, Some(3));
+        assert_eq!(
+            (act.graph.as_str(), act.timestamp.as_str()),
+            ("fixture", "2026-10-20T18:02:11.200000Z")
+        );
+        let Event::ActRecorded(act) = act.event else {
+            panic!("{:?}", act.event)
+        };
+        assert_eq!(
+            (
+                act.action_id.as_str(),
+                act.verb.as_str(),
+                act.summary.as_str()
+            ),
+            ("000000000031", "stored", "stored 1 node")
+        );
+        assert_eq!(act.subjects, ["fac70000-0000-4000-8000-000000000003"]);
+        assert_eq!(
+            act.counts
+                .iter()
+                .map(|(k, v)| (k.as_str(), *v))
+                .collect::<Vec<_>>(),
+            [
+                ("edges", 1),
+                ("embeddings", 1),
+                ("nodes", 1),
+                ("timelines", 0)
+            ]
+        );
+        assert_eq!(act.judged_by, None);
+
+        let (seq, advisory) = event("advisory_raised");
+        assert_eq!(seq, Some(5));
+        let Event::AdvisoryRaised(advisory) = advisory.event else {
+            panic!("{:?}", advisory.event)
+        };
+        assert_eq!(
+            (
+                advisory.action_id.as_str(),
+                advisory.tool.as_str(),
+                advisory.kind.as_str(),
+                advisory.action.as_str()
+            ),
+            (
+                "000000000032",
+                "store_decomposition",
+                "tag_joined_topic",
+                "flag"
+            )
+        );
+        assert!(advisory.message.starts_with("The tag 'swifts'"));
+        assert_eq!(advisory.subjects.len(), 2);
+        assert_eq!(advisory.detail["tag"], "swifts");
+        assert_eq!((advisory.surfaced, advisory.notify_user), (false, true));
+        assert_eq!(
+            advisory.judged_by.as_deref(),
+            Some("a9e00000-0000-4000-8000-000000000001")
+        );
+
+        // A verb, a kind and an action the contract does not list yet are
+        // kept as they arrive.
+        let future = r#"{"event_type": "advisory_raised", "graph": "g", "session_id": "s",
+            "timestamp": "2026-11-07T10:00:00Z", "action_id": "000000000002", "tool": "reflect",
+            "kind": "a_future_kind", "message": "m", "subjects": [], "detail": {},
+            "action": "a_future_action", "surfaced": true, "notify_user": false, "seq": 2}"#;
+        let Message::Event { envelope, .. } = parse(future) else {
+            panic!()
+        };
+        assert!(
+            matches!(&envelope.event, Event::AdvisoryRaised(a)
+                if a.kind == "a_future_kind" && a.action == "a_future_action" && a.judged_by.is_none()),
+            "{:?}",
+            envelope.event
+        );
+        let decision = r#"{"event_type": "graph_action_recorded", "graph": "g", "session_id": "s",
+            "action_id": "000000000003", "verb": "recurrence_exception", "subjects": ["tl"],
+            "counts": {"a_future_count": 2}, "summary": "s", "judged_by": "j", "seq": 3}"#;
+        let Message::Event { envelope, .. } = parse(decision) else {
+            panic!()
+        };
+        assert!(
+            matches!(&envelope.event, Event::ActRecorded(a)
+                if a.verb == "recurrence_exception" && a.counts["a_future_count"] == 2),
+            "{:?}",
+            envelope.event
+        );
+        // An act numbered as an integer, not the contract's padded string,
+        // does not read.
+        let numbered = r#"{"event_type": "graph_action_recorded", "graph": "g", "session_id": "s",
+            "action_id": 31, "verb": "stored", "subjects": [], "counts": {}, "summary": "s",
+            "seq": 4}"#;
+        let Message::Event { envelope, .. } = parse(numbered) else {
+            panic!()
+        };
+        assert!(
+            matches!(&envelope.event, Event::Unreadable(e) if e.contains("string")),
+            "{:?}",
+            envelope.event
+        );
+    }
+
+    #[test]
+    fn the_reflect_counter_reads_in_the_contract_shape() {
+        let (seq, counter) = event("reflect_counter_updated");
+        assert_eq!(seq, Some(6));
+        assert_eq!(counter.graph, "fixture");
+        assert_eq!(
+            counter.event,
+            Event::ReflectCounterUpdated(Reflect {
+                count: 9,
+                threshold: 10,
+                suggested: false
+            })
+        );
+    }
+
+    #[test]
+    fn the_six_pipeline_events_read_in_the_contract_shape() {
+        let pipeline = |name: &str| {
+            let (_, envelope) = event(name);
+            assert_eq!(
+                envelope.graph, "",
+                "{name}: a pipeline event names no graph"
+            );
+            assert_eq!(envelope.event_type, name);
+            match envelope.event {
+                Event::Pipeline(p) => *p,
+                other => panic!("{name} read as {other:?}"),
+            }
+        };
+        let Pipeline::Started {
+            pipeline_name,
+            place_names,
+            transition_names,
+            edges,
+        } = pipeline("pipeline_started")
+        else {
+            panic!()
+        };
+        assert_eq!(
+            (pipeline_name.as_str(), place_names.len(), transition_names),
+            (
+                "reflect",
+                3,
+                vec!["topic_consolidation".to_owned(), "pending_review".into()]
+            )
+        );
+        assert_eq!(edges.len(), 4);
+        assert_eq!(
+            (edges[0].label.as_deref(), edges[2].label.as_deref()),
+            (None, Some("pairs"))
+        );
+        assert_eq!(
+            pipeline("transition_fired"),
+            Pipeline::TransitionFired {
+                pipeline_name: "store".into(),
+                transition_name: "embed".into(),
+                input_places: vec!["claims".into()],
+            }
+        );
+        assert_eq!(
+            pipeline("transition_completed"),
+            Pipeline::TransitionCompleted {
+                pipeline_name: "store".into(),
+                transition_name: "embed".into(),
+                output_places: vec!["embedded".into()],
+                duration_ms: 148.25,
+            }
+        );
+        assert_eq!(
+            pipeline("tokens_updated"),
+            Pipeline::TokensUpdated {
+                pipeline_name: "store".into(),
+                place_token_counts: [("claims".to_owned(), 0), ("embedded".to_owned(), 3)]
+                    .into_iter()
+                    .collect(),
+            }
+        );
+        assert_eq!(
+            pipeline("pipeline_completed"),
+            Pipeline::Completed {
+                pipeline_name: "store".into(),
+                transitions_fired: 4,
+                duration_ms: 1520.5,
+            }
+        );
+        assert_eq!(
+            pipeline("pipeline_failed"),
+            Pipeline::Failed {
+                pipeline_name: "reflect".into(),
+                error: "the embedder did not answer".into(),
+                transition_name: Some("pending_review".into()),
+                transitions_fired: 1,
+                duration_ms: 30012.0,
+            }
+        );
+        // A failure outside any transition names none, and a whole number
+        // of milliseconds reads.
+        let early = r#"{"event_type": "pipeline_failed", "category": "pipeline", "graph": "",
+            "session_id": "s", "pipeline_name": "store", "error": "e", "transition_name": null,
+            "transitions_fired": 0, "duration_ms": 3, "seq": 9}"#;
+        let Message::Event { envelope, .. } = parse(early) else {
+            panic!()
+        };
+        assert!(
+            matches!(&envelope.event, Event::Pipeline(p) if matches!(**p,
+                Pipeline::Failed { transition_name: None, duration_ms, .. } if duration_ms == 3.0)),
+            "{:?}",
+            envelope.event
+        );
+        let broken = r#"{"event_type": "transition_completed", "pipeline_name": "store",
+            "transition_name": "embed", "session_id": "s", "seq": 10}"#;
+        let Message::Event { envelope, .. } = parse(broken) else {
+            panic!()
+        };
+        assert!(
+            matches!(&envelope.event, Event::Unreadable(e) if e.contains("output_places")),
+            "{:?}",
+            envelope.event
+        );
+    }
+
+    #[test]
     fn events_this_client_does_not_act_on_are_received_and_kept_only_for_their_seq() {
-        for (name, event_type, seq) in [
-            ("graph_action_recorded", "graph_action_recorded", 3),
-            ("transition_fired", "transition_fired", 4),
-            ("a_future_event", "a_future_event", 14),
-        ] {
-            let (read_seq, envelope) = event(name);
-            assert_eq!(read_seq, Some(seq), "{name}");
-            assert_eq!(envelope.event, Event::Other, "{name}");
-            assert_eq!(envelope.event_type, event_type);
-        }
+        let (read_seq, envelope) = event("a_future_event");
+        assert_eq!(read_seq, Some(14));
+        assert_eq!(envelope.event, Event::Other);
+        assert_eq!(envelope.event_type, "a_future_event");
+        let embedding = r#"{"event_type": "embedding_stored", "category": "graph", "graph": "",
+            "item_id": "n", "model_id": "m", "dimensions": 768, "session_id": "s", "seq": 1}"#;
         let old_pipeline = r#"{"event_type": "transition_enabled", "category": "pipeline",
             "pipeline_name": "store", "transition_name": "embed", "session_id": "s", "seq": 2}"#;
-        assert!(matches!(
-            parse(old_pipeline),
-            Message::Event { envelope, .. } if envelope.event == Event::Other
-        ));
+        for text in [embedding, old_pipeline] {
+            assert!(matches!(
+                parse(text),
+                Message::Event { envelope, .. } if envelope.event == Event::Other
+            ));
+        }
     }
 
     #[test]

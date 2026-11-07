@@ -6,7 +6,7 @@
 //! work. The hub it reads from, and the shapes it reads, are specified in the
 //! Epimemer repository's `dev-docs/VIZ_CONTRACT.md`.
 //!
-//! This is slices 1 to 10 and 12 of that order: it reads one graph's snapshot from
+//! This is slices 1 to 10, 12 and 13 of that order: it reads one graph's snapshot from
 //! the hub and draws every node on a time axis, topics on a map fitted from
 //! their embeddings and saved (DESIGN.md §7) and claims around them, in
 //! recorded time as a disc at the moment it was recorded and in claim time
@@ -22,7 +22,9 @@
 //! field of DESIGN.md §10; it follows the graph's event stream, applying
 //! each event as it comes (DESIGN.md §11), and keeps the session's retrieval
 //! records, one of which the bar can choose to see what a tool call handed
-//! the agent (`retrieval.rs`). It builds for the browser as well
+//! the agent (`retrieval.rs`), and its acts, advisories and pipeline runs,
+//! which the side panel shows as a log (`event_log.rs`), with the graph's
+//! reflect counter in the bar (`reflect_counter.rs`). It builds for the browser as well
 //! as natively, from the same code: the reads and the stream run in the
 //! background over a transport each platform implements (`background.rs`,
 //! `hub.rs`, `stream.rs`), and in a browser the options come from the page's
@@ -42,6 +44,7 @@ mod clip;
 mod dev;
 mod edge_index;
 mod edges;
+mod event_log;
 mod filter;
 mod focus;
 mod fonts;
@@ -57,6 +60,7 @@ mod pickers;
 mod picking;
 mod presets;
 mod projection;
+mod reflect_counter;
 mod relax;
 mod relayout;
 mod reload;
@@ -98,6 +102,7 @@ use crate::panel::PanelPlugin;
 use crate::persist::{MapKey, Store};
 use crate::picking::PickPlugin;
 use crate::presets::{PRESET_NAMES, Preset};
+use crate::reflect_counter::ReflectPlugin;
 use crate::relayout::{MapState, RelayoutPlugin};
 use crate::reload::{Arrival, Catalogue, LoadStatus, Prepared, ReloadPlugin};
 use crate::retrieval::RetrievalPlugin;
@@ -163,7 +168,8 @@ Filters, which dim the nodes that fail them:
   --ui-state STATE    how the bar starts: open (the default), collapsed,
                       or with a picker's list open: sessions, graphs,
                       metacontexts, topics, topics:PREFIX with PREFIX
-                      typed, sources, or retrievals
+                      typed, sources, or retrievals; or log, open with the
+                      log in the side panel
   --screenshot PATH   save a PNG of the view and the bar once the scene is
                       drawn, then exit
   --screenshot-after SECONDS
@@ -862,6 +868,7 @@ fn assemble(app: &mut App, args: Args, start: Start) {
         .add_plugins(RetrievalPlugin {
             wanted: args.filter.retrieval.clone(),
         })
+        .add_plugins(ReflectPlugin)
         .insert_resource(status);
     #[cfg(not(target_arch = "wasm32"))]
     {

@@ -15,6 +15,8 @@
 //! session the hub no longer knows, which is chosen again by graph. The
 //! session's retrieval records (VIZ_CONTRACT.md §4) are read by
 //! [`retrievals`], in the shape the `retrieval_recorded` event carries too.
+//! The graph list carries the reflect counter of the session's active
+//! graph ([`Reflect`]), in the shape `reflect_counter_updated` carries it.
 //!
 //! The reads are futures, written once over a transport with one
 //! implementation for each platform: natively a blocking read with ureq
@@ -91,6 +93,18 @@ pub struct GraphList {
     pub graphs: Vec<String>,
     pub active_graph: String,
     pub backend: String,
+    /// The reflect counter of `active_graph`, and of no other graph.
+    pub reflect: Reflect,
+}
+
+/// A graph's reflect counter: the stores since its last reflect, the
+/// threshold at which reflect is suggested, and whether the count has
+/// reached it. The graph list and `reflect_counter_updated` carry it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct Reflect {
+    pub count: i64,
+    pub threshold: i64,
+    pub suggested: bool,
 }
 
 /// `GET /api/snapshot?session=&graph=`, the parts this client reads so far.
@@ -1242,6 +1256,29 @@ mod tests {
             (nodes[1].score, nodes[2].provenance.as_str()),
             (None, "a_future_provenance")
         );
+    }
+
+    #[test]
+    fn the_graph_list_carries_the_active_graphs_reflect_counter() {
+        let text = r#"{"graphs": ["epimemer-dev", "rcloud"], "active_graph": "epimemer-dev",
+            "backend": "surrealdb", "reflect": {"count": 8, "threshold": 10, "suggested": false}}"#;
+        let list: GraphList = serde_json::from_str(text).unwrap();
+        assert_eq!(
+            (list.active_graph.as_str(), list.reflect),
+            (
+                "epimemer-dev",
+                Reflect {
+                    count: 8,
+                    threshold: 10,
+                    suggested: false
+                }
+            )
+        );
+        let without = r#"{"graphs": [], "active_graph": "g", "backend": "memory"}"#;
+        let error = serde_json::from_str::<GraphList>(without)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("reflect"), "{error}");
     }
 
     #[test]
