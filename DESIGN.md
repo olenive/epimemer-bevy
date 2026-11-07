@@ -1,11 +1,13 @@
 # epimemer-bevy: design
 
-Status: **design, 2026-10-20**, written during the planning discussion in
-the Epimemer repository and moved here the day this repository was created;
-a pointer remains at Epimemer's `dev-docs/EPIMEMER_BEVY_DESIGN.md`. Nothing
-in it is built. The numbers were measured on the development graph on
-2026-10-18, through the hub described in `VIZ_CONTRACT.md`, which is the only
-surface this client depends on. `VIZ_CONTRACT.md` throughout means
+Status: written on 2026-10-20 during the planning discussion in the
+Epimemer repository and moved here the day this repository was created;
+this file is the design's only home. Slices 1 to 10 of §14 are built
+(2026-10-21), slice 11 waits on its Petritype prerequisites, and slices 12
+to 15 were added on 2026-11-07, when the owner decided this client replaces
+the dashboard (§1). The numbers in §3 were measured on the development graph
+on 2026-10-18, through the hub described in `VIZ_CONTRACT.md`, which is the
+only surface this client depends on. `VIZ_CONTRACT.md` throughout means
 `dev-docs/VIZ_CONTRACT.md` in the Epimemer repository.
 
 The short version: one 3D scene in which the knowledge graph stands on a
@@ -16,7 +18,7 @@ move under the user. Native first, wasm second.
 
 ## 1. The goal
 
-A second visualiser for Epimemer graphs, in Rust on Bevy, that is smoother
+The visualiser for Epimemer graphs, in Rust on Bevy, that is smoother
 to move around in than the TypeScript dashboard and shows one thing the
 dashboard cannot: time as a third dimension, so that a claim that held for
 years and a claim pinned to a week look different at a glance, and a claim
@@ -33,18 +35,21 @@ Non-goals, for the first slices and until said otherwise:
 
 - **Read-only.** The client records no verdict, archives nothing, changes no
   setting. The hub exposes no write, and this client asks for none.
-- **Not a replacement** of the dashboard. The dashboard keeps the event log,
-  the retrieval provenance, the warnings panel and the pipeline strip. This
-  client replaces nothing until it does everything the dashboard does for a
-  given panel, and that day is not planned.
-- **Native first.** The wasm build is a later slice (§13), not a constraint
-  on the first ones.
+- **Replacing the dashboard** stopped being a non-goal on 2026-11-07, when
+  the owner decided this client replaces it. Its log, retrieval focus and
+  pipeline views come here as slices 13, 12 and 11 (§14); its
+  warnings-settings panel is not carried over, since the MCP tool
+  `configure_warnings` is the interface and the log shows the advisories
+  themselves. The dashboard leaves Epimemer in one cut once slices 12 and
+  13 exist.
+- **Native first.** The browser build came with slice 10 (§13); native
+  stays the development target, where the suite runs.
 - **No layout on the server.** Epimemer stays a data source (§12).
 
 ## 2. Decisions
 
-Taken with the user on 2026-10-18 and 2026-10-20, not to be re-litigated
-without them.
+Taken with the user on 2026-10-18, 2026-10-20 and 2026-11-07, not to be
+re-litigated without them.
 
 | Question | Decision |
 |---|---|
@@ -61,6 +66,7 @@ without them.
 | Edges | Membership becomes geometry, claim-to-claim edges are lines on hover and focus, succession and merge edges are always drawn, vertically (§5). No ribbons. |
 | Time with no timepoint | A disc at recorded time, never a column (§4). |
 | What Epimemer adds for this | A schema version and an embeddings route, both in the contract. No layout, no as-of snapshot. |
+| The dashboard | Replaced by this client (2026-11-07), and removed from the Epimemer repository in one clean cut once slices 12 and 13 exist. The browser bundle is a release asset here, which `epimemer viz fetch` downloads into a directory the hub serves (§12, §14). |
 
 ## 3. The data as the client sees it
 
@@ -537,10 +543,11 @@ The client fetches the snapshot once and then applies the `/ws` stream:
 | `session_connected`, `session_disconnected`, `session_dropped` | Update the session picker; a `session_connected` for the followed session refetches the snapshot, because events during the session's disconnection were dropped. |
 | A `seq` gap, or the client's own reconnect | Refetch the snapshot. |
 
-Pipeline events are ignored until the activity bar exists (§13); the
-dashboard's pipeline strip is what shows them today. Replay on subscribe
-carries only acts, advisories and retrieval records, none of which this
-client draws in its first slices, so it is received and dropped.
+Pipeline events are ignored until slice 13 logs them and the activity bar
+draws them (§13, §14); the dashboard's pipeline strip is what shows them
+today. Replay on subscribe carries only acts, advisories and retrieval
+records, none of which this client shows until slices 12 and 13, so until
+then it is received and dropped.
 
 What the build settled (slice 8, 2026-10-20). The client subscribes before
 it reads the snapshot, so an event between the two waits in the stream's
@@ -582,10 +589,24 @@ so it asks for the graph to be read again.
 ## 12. What Epimemer provides, and does not
 
 Provided, in `VIZ_CONTRACT.md`: the schema version, the snapshot, the event
-stream, and the embeddings route with its `node_type` filter, the one
-addition made for this client. The contract names what is not promised:
-positions, as-of snapshots, embeddings for segments, the contents of
-`metadata`, and `claim_kind` on the wire (§16).
+stream, and the embeddings route with its `node_type` filter, added for this
+client. Two promises followed on 2026-11-07 for the views coming from the
+dashboard, both additive, so the schema stays 1:
+
+- the retrieval record's fields: `record_id`, `at`, `tool`, `query`,
+  `graph`, `retrieved` as a list of `{node_id, provenance, score}` or null
+  for "not declared", and `truncated`;
+- the replay rule: the last 512 acts and advisories interleaved, then the
+  last 20 retrieval records; pipeline events, `pipeline_started` and its
+  topology among them, are never replayed.
+
+The hub is to serve this client's browser bundle from a directory that
+`epimemer viz fetch` fills with a pinned, checksummed release of this
+repository; that Epimemer change is not made yet.
+
+The contract names what is not promised: positions, as-of snapshots,
+embeddings for segments, the contents of `metadata`, and `claim_kind` on the
+wire (§16).
 
 Not asked for, deliberately: a layout endpoint (the layout is the client's,
 §7), historical nodes in the snapshot (wanted for §5's connectors, but a
@@ -643,6 +664,14 @@ becomes a replay. Nothing in the layout changes for it.
 
 **Historical nodes.** See §5 and §12.
 
+**The valid-time grammar.** Epimemer's timeline-panel page sets it out in
+its §13, with a mockup (`dev-docs/TIMELINE_VISUALISATION.md`). Both move
+here when the dashboard is deleted, as a reference for how validity is
+drawn. Nothing in this design changes for it.
+
+**Native binaries.** Native builds as release assets are later work, outside
+the migration; slice 14 releases the browser bundle alone.
+
 ## 14. Order of work
 
 Slices, each with tests, each approved before it starts. The first slice is
@@ -690,6 +719,52 @@ deliberately small: it is the test of whether the picture is legible at all.
 10. **Wasm.** The browser build and its serving story (§13).
 11. **The activity bar** (§13), once `petritype-bevy` can mirror an external
     net and both Petritype crates are published.
+12. **Retrieval focus.** Parse `retrieval_recorded` from the stream, and read
+    `GET /api/retrievals` on connect and on a switch of graph. A Retrieval
+    picker in the bar, beside the other pickers, lists the records newest
+    first, each with its tool, its time and how many nodes it retrieved, and
+    adds a filter criterion: a node passes when the chosen record's
+    `retrieved` list names it. A record whose `retrieved` is null, which
+    declares nothing, passes every node; a declared empty list passes none.
+    With a record chosen, the side panel says how many of its retrieved ids
+    are absent from the snapshot. Dim and hide work as for every filter.
+    Acceptance: on the development graph, choosing a record dims or hides
+    every node it did not retrieve and the fps holds; a record that declares
+    nothing changes nothing; clearing the picker restores the view;
+    `just check` passes.
+13. **Log view.** Acts (`graph_action_recorded`) and advisories
+    (`advisory_raised`), from the replay and the stream, in one list, newest
+    first, with a filter by kind; an advisory with `notify_user` set is
+    marked, and a click on a subject id focuses that node. An advisory's
+    kind and action, and the keys of an act's counts, are shown as the
+    strings they arrive as, since the contract leaves them open. The bar
+    shows the reflect counter, from the graph list's `reflect` fields and
+    then `reflect_counter_updated`. Until slice 11 draws pipeline runs, the
+    log shows them as lines from the pipeline events: a run's start, each
+    transition, and its end, with durations; a run already underway when
+    the client connects shows from its next event, since the topology is
+    not replayed. A toggle in the bar opens the log in place of the side
+    panel or beside it; the builder decides which and records it in §10.
+    Acceptance: the replay fills the log on connect; a store made through
+    the MCP server appears as an act, with its advisories, in the same
+    update; a reflect run appears as pipeline lines; `just check` passes.
+14. **Release.** A GitHub Actions workflow on a `v*` tag runs the gates of
+    `just check`, builds with `trunk build --release`, packs `dist/` as
+    `epimemer-bevy-web-<tag>.tar.gz` with a `.sha256` beside it, and attaches
+    both to a GitHub release of the tag. The version in `Cargo.toml` becomes
+    0.2.0. The README gains a paragraph on deployment: the hub serves the
+    unpacked bundle from a directory, which `epimemer viz fetch` fills.
+    Acceptance: a tag produces a release whose tarball, unpacked into a
+    directory an Epimemer hub serves, loads the development graph in a
+    browser with no console errors, and whose checksum verifies.
+15. **Abstraction.** Level of detail by zoom, for large graphs: a busy
+    topic's claims collapse into one glyph carrying their count until the
+    camera is close enough, edges are thinned to the detail shown, and the
+    label budget (§9) is spent on what is drawn. The glyph, the thresholds
+    and what close enough means are written into §7 and §8 before the slice
+    starts, as for every slice. Acceptance: a graph of two thousand nodes is
+    readable at the overview in the browser build, the fps holds, zooming
+    in reveals the claims without moving anything, and `just check` passes.
 
 ## 15. Risks
 
@@ -699,8 +774,8 @@ deliberately small: it is the test of whether the picture is legible at all.
 - **Transparency.** Additive blending removes sorting artifacts but ties the
   design to a dark background and makes very dense regions saturate to
   white. A per-instance alpha cap by local density is the first remedy.
-- **Wasm size and threads.** Known costs (§13), deferred to slice 10 and not
-  allowed to shape the native slices.
+- **Wasm size and threads.** Known costs (§13), deferred to slice 10, which
+  met them: 28.6 MB after `wasm-opt -Oz`, 6.0 MB with brotli, and no threads.
 - **Layout drift.** Many new topics placed by projection and nudging without
   a recalculation leave the map locally crowded. The Recalculate button is
   the user's remedy; a notice when the nudged fraction passes a threshold

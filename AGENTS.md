@@ -16,4 +16,4 @@
 - Epimemer's vocabulary: topic node, metacontext, source node. A tag is only the string in a tag list.
 
 # Memory
-- Epimemer graph `memory`, tag `epimemer-bevy`, metacontext `the-real`. Stores stay high level, never verbatim code or docs. Read the server's guide before nontrivial memory work.
+- Epimemer graph `epimemer-dev`, tag `epimemer-bevy`, metacontext `the-real`. Stores stay high level, never verbatim code or docs. Read the server's guide before nontrivial memory work.
