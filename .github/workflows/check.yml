@@ -1,0 +1,40 @@
+name: Check
+
+# The gates of `just check` on every branch push and pull request, set up as
+# release.yml sets them up. Tags are left to release.yml, which runs the
+# same gates before it builds.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: just check
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          rustup toolchain install stable --profile minimal \
+            --target wasm32-unknown-unknown --component clippy --component rustfmt
+          rustup default stable
+      - run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: gates
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@1.59.0
+      - run: just check

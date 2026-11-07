@@ -7,7 +7,7 @@ pinned to a week and a claim whose period is only vaguely known look
 different at a glance. The graph view, the timeline view and the free 3D view
 are three camera presets of that one scene.
 
-*Status: slices 1 to 10 of `DESIGN.md` §14, 2026-10-21. It draws
+*Status: slices 1 to 10 and 12 to 14 of `DESIGN.md` §14, 2026-11-07. It draws
 every node of one graph on a time axis, topics on a map made from their
 embeddings, so that related topics stand together, and their claims
 around them: in recorded time as a disc at the moment it was recorded, and
@@ -18,7 +18,10 @@ focused claim's validity brackets. The camera presets of `DESIGN.md` §6, a
 free camera between them, and the filters of `DESIGN.md` §10, which dim or
 hide nodes and are set from the bar along the top of the window or from the
 command line, work in both modes. The bar also switches to another
-session's or graph's snapshot. Every node can be hovered and focused, and
+session's or graph's snapshot, filters to the nodes one retrieval
+returned with its Retrieval picker, and opens the log of the session's
+acts, advisories and pipeline runs in place of the side panel's node.
+Every node can be hovered and focused, and
 the labels of `DESIGN.md` §9 name a budget of topics and claims that
 gathers around the focus. The edges of `DESIGN.md` §5 are drawn: a hovered
 or focused node's claim-to-claim edges as lines, all of them at once with
@@ -292,6 +295,7 @@ Along the top of the window, left to right:
 | Status | Active, the only status the snapshot holds. |
 | Topic | Pick a topic from the list, or type the start of its name to narrow the list; Enter takes the first. Clear drops it. |
 | Source | Pick a document from the list, by the first eight characters of its id and the count of nodes read from it. Clear drops it. |
+| Retrieval | Pick one of the session's retrieval records for the graph drawn, newest first, by its tool, time and the count retrieved; the scene dims or hides every node it did not retrieve, a record that declared nothing changes nothing, and a declared empty list leaves none. Clear drops it. |
 | Recorded, or Claim time | Drag either handle, or press the track, to set the time window over the axis drawn; the dates the handles stand for are beside them. In claim time it passes every column that reaches into it, the track spans the claim axis, and a window that reaches an end of it passes what is clipped there. Clear drops it. |
 | Filtered out | Dim or hide the nodes that fail. |
 | Edges | All, the edge toggle: every claim-to-claim edge between visible nodes drawn as a line; `L` does the same. |
@@ -498,7 +502,7 @@ meanwhile.
 
 `just wasm`, which runs `trunk build --release`, builds the bundle into
 `dist/`: `index.html`, the bindings script, the `.wasm` shrunk with
-`wasm-opt -Oz`, and `assets/`. The `.wasm` is 28.6 MB, 9.2 MB once
+`wasm-opt -Oz`, and `assets/`. The `.wasm` is 28.7 MB, 9.2 MB once
 compressed with gzip and 6.0 MB with brotli. The `wasm-release` profile
 in `Cargo.toml`, which optimises the whole program at once and for size,
 takes it there from 45 MB, and makes a release build take about five
@@ -514,6 +518,16 @@ reason above, and there are two ways to do that:
 
 A separate static server would need the hub to send CORS headers, which is
 also an Epimemer change.
+
+A tag `vX.Y.Z` that matches the version in `Cargo.toml` makes a GitHub
+release of the bundle (`.github/workflows/release.yml`) with two assets:
+`epimemer-bevy-web-vX.Y.Z.tar.gz`, whose top level is the files of
+`dist/`, and `epimemer-bevy-web-vX.Y.Z.tar.gz.sha256`, which
+`sha256sum -c` verifies in the directory that holds both. The released
+bundle is built for the root of its origin. The deployment is the hub
+serving the unpacked bundle from a directory, and the release asset is what
+Epimemer's `epimemer viz fetch` is to fetch into it; neither the directory
+nor the command is in Epimemer yet.
 
 The bundle draws with WebGL2, which every current browser has. Bevy's
 `webgpu` feature draws with WebGPU instead, but a bundle built with it has

@@ -1,6 +1,6 @@
 [package]
 name = "epimemer-bevy"
-version = "0.1.0"
+version = "0.2.0"
 description = "A Bevy visualiser for Epimemer graphs: one 3D scene with time as the third axis."
 edition = "2024"
 rust-version = "1.96"

@@ -1,0 +1,87 @@
+name: Release
+
+# A tag `vX.Y.Z` runs the gates of `just check`, builds the browser bundle
+# with `trunk build --release`, and attaches it to a GitHub release of the
+# tag as two assets: `epimemer-bevy-web-vX.Y.Z.tar.gz`, whose top level is
+# the bundle's files, and `epimemer-bevy-web-vX.Y.Z.tar.gz.sha256`, which
+# `sha256sum -c` verifies. The bundle is the same on every platform, so one
+# Linux runner builds it.
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    name: Build and attach the browser bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: The tag must be the version in Cargo.toml
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "tag is $GITHUB_REF_NAME but Cargo.toml says $version"
+            exit 1
+          fi
+
+      # The runner's rustup, so that no action stands between the build and
+      # the toolchain. Stable, which is at least the crate's rust-version.
+      - name: Rust stable, with the browser target, clippy and rustfmt
+        run: |
+          rustup toolchain install stable --profile minimal \
+            --target wasm32-unknown-unknown --component clippy --component rustfmt
+          rustup default stable
+
+      # The native build links ALSA (audio), udev (gamepads) and the Wayland
+      # client, which the gates compile and test against.
+      - name: Bevy's native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+
+      # The key is shared with check.yml, so a tag can start from the cache a
+      # push to the default branch left.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: gates
+
+      # Prebuilt binaries, checked against the action's own checksums.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@1.59.0,trunk@0.22.0
+
+      - run: just check
+
+      # Trunk fetches the wasm-bindgen that Cargo.lock names, and wasm-opt.
+      - run: trunk build --release
+
+      # `*` makes the bundle's files the archive's top level, and leaves out
+      # trunk's empty `.trunk-lock`. The checksum file names the tarball
+      # alone, so `sha256sum -c` verifies it in the directory holding both.
+      - name: Pack the bundle and its checksum
+        run: |
+          asset="epimemer-bevy-web-$GITHUB_REF_NAME.tar.gz"
+          (cd dist && tar -czf "../$asset" -- *)
+          sha256sum "$asset" > "$asset.sha256"
+          sha256sum -c "$asset.sha256"
+          tar -tzf "$asset"
+
+      # Created on the first run, and its assets replaced on a re-run, so a
+      # run that failed after creating the release can be run again.
+      - name: Attach both to the tag's release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          asset="epimemer-bevy-web-$GITHUB_REF_NAME.tar.gz"
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$asset" "$asset.sha256" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$asset" "$asset.sha256" \
+              --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
+          fi

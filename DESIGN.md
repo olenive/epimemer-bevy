@@ -770,6 +770,25 @@ needs it. `trunk serve` is the development server and passes `/api` and
 serving the bundle from a static directory, an Epimemer change not made
 yet. Slice 2 keeps the topic map in local storage there (§7).
 
+**What slice 14 settled.** A tag `vX.Y.Z` releases the browser bundle.
+`.github/workflows/release.yml` fails unless the tag is `v` followed by the
+version in `Cargo.toml`, runs `just check`, builds with
+`trunk build --release`, and attaches two assets to a GitHub release of the
+tag:
+`epimemer-bevy-web-vX.Y.Z.tar.gz`, whose top level is the files of `dist/`
+(`index.html`, the hashed bindings script and `.wasm`, and `assets/` with
+the Inter font), and `epimemer-bevy-web-vX.Y.Z.tar.gz.sha256` in
+`sha256sum`'s format. `check.yml` runs the same gates on every branch push
+and pull request. One Linux runner builds the bundle, since it is the same
+for every platform, with stable Rust from the runner's rustup and `just`
+and `trunk` as prebuilt binaries at the versions the local build used. Built
+locally for 0.2.0, the bundle is 29.2 MB, its `.wasm` 28.7 MB, and the
+tarball 9.5 MB. The bundle names its script and `.wasm` from the root of
+its origin, so the hub's directory is to be served at `/`, or a bundle for
+a mount below the root is built with `--public-url`. The acceptance's
+browser half waits for that directory and `epimemer viz fetch`, which are
+not in Epimemer yet.
+
 **As-of scrubbing.** If Epimemer grows an as-of snapshot route, a scrubber
 on the time axis shows the graph as it was, and the recorded-time mode
 becomes a replay. Nothing in the layout changes for it.
