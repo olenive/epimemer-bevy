@@ -1,7 +1,10 @@
 //! The side panel (DESIGN.md §10): the focused node in full, on the right
 //! of the window, in Bevy UI.
 //!
-//! With a node focused the panel shows, top to bottom:
+//! With a retrieval record chosen in the bar, the panel's first line says
+//! how many of the ids it retrieved name no active node of the graph drawn,
+//! or that it declares none (`retrieval.rs`), whatever is focused. With a
+//! node focused the panel shows, top to bottom:
 //!
 //! - every field of the contract's NodeView, named in plain words, the
 //!   content and the description whole and wrapped where the label cuts
@@ -57,7 +60,7 @@ use crate::bar::style;
 use crate::camera::{BarCover, PanelCover};
 use crate::clip::{beyond_line, clip_note, is_clipped};
 use crate::edge_index::{EdgeIndex, End};
-use crate::filter::{RefreshShown, Shown, is_visible};
+use crate::filter::{Filter, RefreshShown, Shown, is_visible};
 use crate::focus::{Focus, FocusHistory, GoBack, back_target};
 use crate::graph_index::GraphIndex;
 use crate::hub::{NodeType, NodeView, parse_timestamp};
@@ -66,6 +69,7 @@ use crate::labels::label_text;
 use crate::layout::{Filing, Kind};
 use crate::pickers::{Pickers, short_id};
 use crate::relayout::MapState;
+use crate::retrieval;
 use crate::time_axis::{
     Linked, Placement, TimeMode, TimeModel, Validity, bound_text, date, line_text, reason_text,
 };
@@ -796,11 +800,13 @@ struct Sources<'w> {
     live: Option<Res<'w, LiveGraph>>,
     history: Res<'w, FocusHistory>,
     map: Option<Res<'w, MapState>>,
+    filter: Option<Res<'w, Filter>>,
 }
 
 impl Sources<'_> {
     fn changed(&self) -> bool {
         self.focus.is_changed()
+            || self.filter.as_ref().is_some_and(|f| f.is_changed())
             || self.index.as_ref().is_some_and(|i| i.is_changed())
             || self.model.is_changed()
             || self.mode.is_changed()
@@ -844,7 +850,16 @@ fn refresh_lines(
             .unwrap_or_default(),
         map: sources.map.as_deref(),
     };
-    let (title, lines) = node_lines(&context, sources.focus.0);
+    let (title, mut lines) = node_lines(&context, sources.focus.0);
+    if let Some(focus) = sources.filter.as_deref().and_then(|f| f.retrieval.as_ref()) {
+        lines.insert(
+            0,
+            Line::Field {
+                name: "Retrieval".to_owned(),
+                value: retrieval::panel_line(focus, index),
+            },
+        );
+    }
     header.set_if_neq(PanelHeader {
         title,
         back: back_target(&sources.history, index).is_some(),

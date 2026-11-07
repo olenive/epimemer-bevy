@@ -19,8 +19,11 @@
 //!
 //! System messages keep the bar's session list up to date, and
 //! `graph_switched` a session's active graph there; neither changes what is
-//! drawn. An event for another session or another graph is dropped, and so
-//! are the events this client does not act on.
+//! drawn. A `retrieval_recorded` of the session followed is kept for the
+//! Retrieval picker at once, whatever graph it is of and whether or not a
+//! graph is being read, since it changes nothing drawn (`retrieval.rs`).
+//! An event for another session or another graph is dropped, and so are the
+//! events this client does not act on.
 //!
 //! [`LiveState`] says how the stream stands, for the bar: connected, lost
 //! and trying again with the last error, or reading the graph again; and
@@ -36,10 +39,11 @@ use crate::apply::{self, Changes, LiveGraph, Outcome, Picture};
 use crate::camera::Places;
 use crate::focus::{Focus, Hovered};
 use crate::graph_index::GraphIndex;
-use crate::hub::SessionInfo;
+use crate::hub::{RetrievalRecord, SessionInfo};
 use crate::pickers::{self, Pickers, short_id};
 use crate::relayout;
 use crate::reload::{self, Catalogue, LoadStatus, Loading, Refetch, receive_loads};
+use crate::retrieval::{self, Retrievals};
 use crate::stream::{self, Envelope, Event, Item, Message, Stream, Subscription, System};
 use crate::time_axis::{TimeMode, TimeModel};
 use crate::time_mode;
@@ -281,6 +285,31 @@ fn route(
         set_active_graph(world, &envelope.session_id, new_graph);
     }
     let (session, graph) = target(world, loading);
+    match &envelope.event {
+        Event::RetrievalRecorded(record) => {
+            let kept = envelope.session_id == session && keep_record(world, &session, record);
+            if state.log_events {
+                let seq = seq.map_or_else(|| "-".to_owned(), |s| s.to_string());
+                let did = match (envelope.session_id == session, kept) {
+                    (false, _) => "about another session",
+                    (true, true) => "kept for the Retrieval picker",
+                    (true, false) => "held already",
+                };
+                eprintln!(
+                    "event {seq} {} record {} by {}: {did}",
+                    envelope.event_type,
+                    retrieval::record_number(&record.record_id),
+                    record.tool
+                );
+            }
+            return;
+        }
+        Event::Unreadable(error) if envelope.event_type == "retrieval_recorded" => {
+            warn!("live: a retrieval record this client cannot read: {error}");
+            return;
+        }
+        _ => {}
+    }
     let elsewhere =
         envelope.session_id != session || (!envelope.graph.is_empty() && envelope.graph != graph);
     if elsewhere || matches!(envelope.event, Event::Other | Event::GraphSwitched { .. }) {
@@ -307,6 +336,19 @@ fn route(
         return;
     }
     to_apply.push((seq, envelope));
+}
+
+/// Keeps a retrieval record of `session`, the session followed or being
+/// read; whether it was new.
+fn keep_record(world: &mut World, session: &str, record: &RetrievalRecord) -> bool {
+    let Some(mut store) = world.get_resource_mut::<Retrievals>() else {
+        return false;
+    };
+    let kept = retrieval::remember(store.bypass_change_detection(), session, [record.clone()]);
+    if kept {
+        store.set_changed();
+    }
+    kept
 }
 
 /// Keeps the bar's session list up to date with a system message.
@@ -460,6 +502,11 @@ pub fn event_line(
             timeline.timepoints.len()
         ),
         Event::GraphSwitched { new_graph, .. } => format!("to {new_graph:?}"),
+        Event::RetrievalRecorded(record) => format!(
+            "record {} by {}",
+            retrieval::record_number(&record.record_id),
+            record.tool
+        ),
         Event::Other => String::new(),
         Event::Unreadable(error) => format!("unreadable: {error}"),
     };
@@ -615,6 +662,7 @@ mod tests {
     use crate::graph_index::tests::{edge, node};
     use crate::hub::{EdgeView, GraphList, NodeType, NodeView, Snapshot};
     use crate::reload::{Arrival, Purpose, catalogue, prepare};
+    use crate::retrieval::tests::record;
     use crate::scene::{Disc, DiscMaterial};
     use crate::stream::Command;
 
@@ -823,6 +871,60 @@ mod tests {
         assert_eq!(
             app.world().resource::<Catalogue>().session.active_graph,
             "elsewhere"
+        );
+    }
+
+    #[test]
+    fn a_retrieval_record_is_kept_once_and_changes_nothing_drawn() {
+        let (mut app, items, _commands) = app(&small());
+        app.init_resource::<Retrievals>();
+        items.send(Item::Connected { connection: 1 }).unwrap();
+        let recorded = |seq, n, session: &str| {
+            Item::Message(Message::Event {
+                seq: Some(seq),
+                envelope: Box::new(Envelope {
+                    event_type: "retrieval_recorded".into(),
+                    session_id: session.into(),
+                    graph: "test".into(),
+                    event: Event::RetrievalRecorded(Box::new(record(n, "test", Some(&["a"])))),
+                }),
+            })
+        };
+        // The replay on subscribe, the same record again, and one of another
+        // session.
+        for (seq, n, session) in [
+            (1, 1, SESSION),
+            (2, 2, SESSION),
+            (3, 2, SESSION),
+            (4, 3, "someone-else"),
+        ] {
+            items.send(recorded(seq, n, session)).unwrap();
+        }
+        app.update();
+        let store = app.world().resource::<Retrievals>();
+        assert_eq!(store.session, SESSION);
+        assert_eq!(
+            store.records.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["000000000001", "000000000002"]
+        );
+        let state = app.world().resource::<LiveState>();
+        assert_eq!((state.received, state.applied), (4, 0));
+        assert_eq!(discs(&mut app), 2);
+        assert!(refetches(&mut app).is_empty());
+        let broken = Item::Message(Message::Event {
+            seq: Some(5),
+            envelope: Box::new(Envelope {
+                event_type: "retrieval_recorded".into(),
+                session_id: SESSION.into(),
+                graph: "test".into(),
+                event: Event::Unreadable("missing field `retrieved`".into()),
+            }),
+        });
+        items.send(broken).unwrap();
+        app.update();
+        assert!(
+            refetches(&mut app).is_empty(),
+            "a record that does not read changes nothing drawn, so nothing is read again"
         );
     }
 

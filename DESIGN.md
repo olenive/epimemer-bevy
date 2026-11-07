@@ -5,7 +5,7 @@ Epimemer repository and moved here the day this repository was created;
 this file is the design's only home. Slices 1 to 10 of §14 are built
 (2026-10-21), slice 11 waits on its Petritype prerequisites, and slices 12
 to 15 were added on 2026-11-07, when the owner decided this client replaces
-the dashboard (§1). The numbers in §3 were measured on the development graph
+the dashboard (§1); slice 12 was built the same day. The numbers in §3 were measured on the development graph
 on 2026-10-18, through the hub described in `VIZ_CONTRACT.md`, which is the
 only surface this client depends on. `VIZ_CONTRACT.md` throughout means
 `dev-docs/VIZ_CONTRACT.md` in the Epimemer repository.
@@ -115,6 +115,20 @@ Three facts about the data that shape the design more than the counts:
    that, 7,024 edges, and is a filter rather than a position. A claim with
    no filing edge is placed by its first tag, and with no tag either, in an
    "unfiled" region at the map's edge.
+
+**Retrieval records** come beside the graph rather than in it (slice 12).
+A record is what one tool call handed the agent, in the field table below
+`VIZ_CONTRACT.md` §4: `record_id`, `at`, `tool`, `query`, `graph`,
+`retrieved`, `truncated` and `response_text`. `retrieved` lists at most 200
+`{node_id, provenance, score}`, or is null where the tool declared nothing,
+which differs from an empty list. `GET /api/retrievals?session=` answers the
+session's 20 most recent records across every graph, oldest first; the
+stream's `retrieval_recorded` event carries one as it is made, and the
+replay on subscribe the last 20 of the graphs subscribed to (§11). Measured
+on the development graph's session on 2026-11-07, the route answered 20
+records in 78 KB, all of `epimemer-dev`, from six tools: seven declare
+nothing (six `segment` calls and an `apply_reflection`), one declares an
+empty list, and the other twelve name from 1 to 13 nodes.
 
 ## 4. Time
 
@@ -494,6 +508,7 @@ The set is fixed; a filter not on this list is a design change:
 | Topic subtree | A topic and everything filed under it (and its subtopics where `subtopic_of` exists). A topic tagged with it counts too, one level deep, with the claims filed under that topic. |
 | Time window | Two handles on the axis; outside dims, inside is full. |
 | Source document | One `sourced_from` target; everything read from one document. |
+| Retrieval | One retrieval record of the graph drawn (§3): the nodes its `retrieved` names pass. A record that declares nothing passes every node; one that declares an empty list passes none. |
 | Edge toggle | Claim-to-claim edges for the whole filter, on or off (§5). |
 | Search | Substring over content and description; hits are focused in turn. |
 | Presets | The cameras of §6. |
@@ -503,6 +518,42 @@ The set is fixed; a filter not on this list is a design change:
 Filtering dims rather than removes by default (§8), with a "hide" variant
 for when the user wants the filtered-out nodes gone from the budget and the
 picking too.
+
+Where the retrieval records come from (slice 12). `GET /api/retrievals`
+is read for the session drawn when the first graph is drawn and again after
+every switch of graph or session, because the stream follows only the
+graph drawn and the route answers for every graph. Each
+`retrieval_recorded` the stream brings, the replay's twenty among them, is
+added as it comes, even while a graph is being read, since a record changes
+nothing drawn. The two paths bring the same records on purpose, so a record
+is kept once, by its `record_id`: the copy held first stays, except that a
+copy with its query and response text replaces one without, which is what
+the stream sends on a hub bound beyond loopback. The client keeps the 50
+most recent records of the session followed, ordered by `record_id`, whose
+text order is its numeric order, and forgets them on a switch to another
+session, since ids are counted per session.
+
+What the build settled for the retrieval focus (slice 12, 2026-11-07). The
+picker lists only the records whose `graph` is the graph drawn, since ids
+from another graph match nothing, newest first. Each row is the tool
+without its `epimemer.` prefix, the time the tool answered in UTC, and how
+many distinct nodes it retrieved, or "not declared"; a first row, "None",
+clears the choice, as the Clear button beside the picker does. Choosing a
+record copies its ids into the filter, so the choice holds after the record
+falls out of the 50 kept; the picker's button names the record by its tool
+and time while it is kept, and by its number after. A switch of graph
+drops the choice, as it drops a topic, and a read of the graph again keeps
+it. With a record chosen, the side panel's first line counts the record's
+ids that name no active node of the graph drawn, which is the snapshot as
+the stream has kept it, or says that the record declares nothing.
+`--retrieval latest` or `--retrieval ID` chooses a record from the start,
+once the route has answered, and `--ui-state retrievals` opens the picker.
+Checked on the development graph on 2026-11-07, 2,442 nodes: the route
+answered in under 30 ms and the picker listed its 20 records. Choosing the
+search that named 13 nodes dimmed the other 2,429, with none of the 13
+absent, at 62 to 64 frames a second as before; a `segment` record, which
+declares nothing, changed nothing shown; and a `store_decomposition` that
+declared an empty list hid every node in Hide mode.
 
 What the build settled (slice 9, checked on the development graph on
 2026-10-20). The panel is 380 logical pixels wide with 8 around it,
@@ -540,14 +591,15 @@ The client fetches the snapshot once and then applies the `/ws` stream:
 | `node_status_changed` | Remove the node from the active set and leave its succession marker (§5). |
 | `timeline_stored` | Replace the timeline; recompute the claim-time columns that reference it. |
 | `graph_switched` | Nothing by itself; the session's `active_graph` changes and the client shows whichever graph it was asked to. |
+| `retrieval_recorded` | Keep the record for the Retrieval picker (§10), once by its `record_id`; nothing drawn changes. |
 | `session_connected`, `session_disconnected`, `session_dropped` | Update the session picker; a `session_connected` for the followed session refetches the snapshot, because events during the session's disconnection were dropped. |
 | A `seq` gap, or the client's own reconnect | Refetch the snapshot. |
 
 Pipeline events are ignored until slice 13 logs them and the activity bar
 draws them (§13, §14); the dashboard's pipeline strip is what shows them
 today. Replay on subscribe carries only acts, advisories and retrieval
-records, none of which this client shows until slices 12 and 13, so until
-then it is received and dropped.
+records. The records fill the Retrieval picker (§10); the acts and
+advisories are received and dropped until slice 13 logs them.
 
 What the build settled (slice 8, 2026-10-20). The client subscribes before
 it reads the snapshot, so an event between the two waits in the stream's

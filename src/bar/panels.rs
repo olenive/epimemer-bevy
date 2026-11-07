@@ -3,7 +3,9 @@
 //!
 //! A list is spawned under its picker's button when it opens and despawned
 //! when it closes, so it always shows the current lists. Long lists scroll
-//! with the wheel; the topic list also narrows to what is typed.
+//! with the wheel; the topic list also narrows to what is typed. The
+//! retrieval list is the session's records of the graph drawn, newest
+//! first, under a row that chooses none.
 
 use bevy::prelude::*;
 use bevy::text::{EditableText, TextCursorStyle};
@@ -11,6 +13,7 @@ use bevy::ui_widgets::ScrollArea;
 
 use crate::pickers::{Pickers, short_id};
 use crate::reload::Catalogue;
+use crate::retrieval::Entry;
 
 use super::{CheckMark, Control, Panel, Picker, Row, TopicCount, TopicField, TopicRow, style};
 
@@ -27,6 +30,11 @@ pub struct Content<'a> {
     pub reading_sessions: bool,
     pub reading_graphs: bool,
     pub notice: Option<&'a str>,
+    /// The retrieval records of the graph drawn, newest first.
+    pub records: &'a [Entry],
+    pub reading_records: bool,
+    /// Why the records could not be read.
+    pub records_error: Option<&'a str>,
 }
 
 /// The topic list's count line.
@@ -68,6 +76,7 @@ pub fn spawn(commands: &mut Commands, anchor: Entity, picker: Picker, content: &
         Picker::Metacontext => metacontexts(commands, panel, content),
         Picker::Topic => topics(commands, panel, content),
         Picker::Source => sources(commands, panel, content),
+        Picker::Retrieval => retrievals(commands, panel, content),
     }
 }
 
@@ -310,6 +319,58 @@ fn sources(commands: &mut Commands, panel: Entity, content: &Content) {
             row(
                 Control::Source(source.id.clone()),
                 source.label.clone(),
+                style::TEXT,
+            ),
+            ChildOf(list),
+        ));
+    }
+}
+
+fn retrievals(commands: &mut Commands, panel: Entity, content: &Content) {
+    let reading = if content.reading_records {
+        " (reading...)"
+    } else {
+        ""
+    };
+    note(
+        commands,
+        panel,
+        format!(
+            "Retrieval records of {}, newest first{reading}",
+            content.catalogue.graph
+        ),
+        style::CAPTION,
+    );
+    commands.spawn((
+        row(
+            Control::ClearRetrieval,
+            "None: every node passes".into(),
+            style::TEXT,
+        ),
+        ChildOf(panel),
+    ));
+    if content.records.is_empty() {
+        let (words, colour) = match content.records_error {
+            Some(error) if !content.reading_records => (
+                format!("Could not read the retrieval records: {error}"),
+                style::ERROR,
+            ),
+            _ => (
+                "No retrieval record of this graph yet.".to_owned(),
+                style::CAPTION,
+            ),
+        };
+        note(commands, panel, words, colour);
+        return;
+    }
+    let list = commands
+        .spawn((scrolling(px(LIST_WIDTH)), ChildOf(panel)))
+        .id();
+    for entry in content.records {
+        commands.spawn((
+            row(
+                Control::Retrieval(entry.record_id.clone()),
+                entry.label.clone(),
                 style::TEXT,
             ),
             ChildOf(list),

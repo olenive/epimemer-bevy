@@ -15,8 +15,8 @@
 //! [`apply`] swaps the new graph in, in the time mode drawn: the old discs
 //! go, the new index, places, time model and picker lists replace the
 //! old, a switch of time mode under way stops, the filter forgets its topic,
-//! time window and source document (which name things in the old graph)
-//! and keeps its kinds, metacontexts and mode, the focus and the hover are
+//! time window, source document and retrieval record (which name things in
+//! the old graph) and keeps its kinds, metacontexts and mode, the focus and the hover are
 //! cleared, since an index names a node of one graph, and the camera fits
 //! the new graph from the 3D preset. A load that fails leaves the old graph drawn
 //! and says why in [`LoadStatus`], which the bar shows.
@@ -565,20 +565,22 @@ pub fn receive_loads(world: &mut World) {
 }
 
 /// The filter for a new graph: the criteria that name things in the old
-/// one (a topic, a stretch of its time axis, a document) are dropped, and
-/// the kinds, the metacontexts and the mode are kept.
+/// one (a topic, a stretch of its time axis, a document, a retrieval
+/// record) are dropped, and the kinds, the metacontexts and the mode are
+/// kept.
 pub fn filter_for_new_graph(filter: &Filter) -> Filter {
     Filter {
         topic: None,
         window: None,
         source: None,
+        retrieval: None,
         ..filter.clone()
     }
 }
 
 /// The filter for the graph drawn, read again: every criterion is kept,
-/// except a topic that is no longer a drawn topic and a document no drawn
-/// node is read from any more.
+/// the retrieval record among them, except a topic that is no longer a
+/// drawn topic and a document no drawn node is read from any more.
 pub fn filter_for_refetch(filter: &Filter, index: &GraphIndex) -> Filter {
     let topic = filter.topic.clone().filter(|id| {
         index
@@ -717,7 +719,7 @@ mod tests {
 
     use super::*;
     use crate::camera::ViewRequest;
-    use crate::filter::{Kinds, Metacontexts, Mode, Shown, TimeWindow};
+    use crate::filter::{Kinds, Metacontexts, Mode, RetrievalFocus, Shown, TimeWindow};
     use crate::graph_index::tests::node;
     use crate::hub::{NodeType, parse_snapshot};
     use crate::presets::Preset;
@@ -783,6 +785,10 @@ mod tests {
                 to: 20.0,
             }),
             source: Some("doc".into()),
+            retrieval: Some(RetrievalFocus {
+                record_id: "000000000003".into(),
+                retrieved: Some(["old-fact".to_owned()].into()),
+            }),
             mode: Mode::Hide,
             ..Filter::default()
         };
@@ -865,9 +871,14 @@ mod tests {
 
         let filter = app.world().resource::<Filter>();
         assert_eq!(
-            (&filter.topic, &filter.window, &filter.source),
-            (&None, &None, &None),
-            "a topic, a window and a document of the old graph mean nothing in the new"
+            (
+                &filter.topic,
+                &filter.window,
+                &filter.source,
+                &filter.retrieval
+            ),
+            (&None, &None, &None, &None),
+            "a topic, a window, a document and a retrieval record of the old graph mean nothing in the new"
         );
         assert!(!filter.kinds.topic && filter.kinds.fact, "kinds kept");
         assert_eq!(
@@ -924,6 +935,23 @@ mod tests {
         assert_eq!(
             app.world().resource::<Filter>().topic.as_deref(),
             Some("old-topic-1")
+        );
+    }
+
+    #[test]
+    fn a_read_again_keeps_the_retrieval_record_chosen() {
+        let prepared = prepare(&fixture()).unwrap();
+        let filter = Filter {
+            retrieval: Some(RetrievalFocus {
+                record_id: "000000000003".into(),
+                retrieved: Some(["no-longer-drawn".to_owned()].into()),
+            }),
+            ..Filter::default()
+        };
+        assert_eq!(
+            filter_for_refetch(&filter, &prepared.index),
+            filter,
+            "its ids are the record's, whatever the graph holds now"
         );
     }
 

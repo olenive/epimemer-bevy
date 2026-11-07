@@ -12,7 +12,9 @@
 //! background, by [`embeddings`]: a hub without the route, older than the
 //! contract, answers `404` from its router rather than the contract's
 //! `{"error"}` body, which [`EmbeddingsError::NoRoute`] tells apart from a
-//! session the hub no longer knows, which is chosen again by graph.
+//! session the hub no longer knows, which is chosen again by graph. The
+//! session's retrieval records (VIZ_CONTRACT.md §4) are read by
+//! [`retrievals`], in the shape the `retrieval_recorded` event carries too.
 //!
 //! The reads are futures, written once over a transport with one
 //! implementation for each platform: natively a blocking read with ureq
@@ -294,6 +296,62 @@ impl fmt::Display for EmbeddingsError {
     }
 }
 
+/// `GET /api/retrievals?session=`: the session's most recent retrieval
+/// records, across every graph, oldest first.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct RetrievalList {
+    pub records: Vec<RetrievalRecord>,
+}
+
+/// The contract's retrieval record: what one tool call handed the agent.
+/// The route and the `retrieval_recorded` event carry the same shape.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct RetrievalRecord {
+    /// Counted from one in its session and padded to twelve digits, so its
+    /// text order is its numeric order.
+    pub record_id: String,
+    /// When the tool answered.
+    pub at: String,
+    /// The tool's name, such as `epimemer.search`.
+    pub tool: String,
+    /// A one-line summary of the call's input, for display; empty on a hub
+    /// bound beyond loopback.
+    pub query: String,
+    /// The session's active graph when the tool answered.
+    pub graph: String,
+    /// The nodes the response named. `None` means the tool declared nothing,
+    /// which differs from an empty list, so the field must be present even
+    /// when it is null.
+    #[serde(deserialize_with = "present")]
+    pub retrieved: Option<Vec<RetrievedNode>>,
+    /// A cap cut `retrieved` or `response_text`.
+    pub truncated: bool,
+    /// The text the tool returned, for display; empty on a hub bound beyond
+    /// loopback.
+    pub response_text: String,
+}
+
+/// One node a retrieval record names, and how the tool reached it.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct RetrievedNode {
+    pub node_id: String,
+    /// `lexical`, `segment`, `vector`, `expanded` or `direct`, kept as the
+    /// hub wrote it.
+    pub provenance: String,
+    /// Its similarity or BM25 score; `None` where the tool ranks nothing.
+    pub score: Option<f64>,
+}
+
+/// A nullable field that must be present: serde reads a missing `Option`
+/// as `None` unless the field is read through a function.
+fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::deserialize(deserializer)
+}
+
 /// What went wrong reaching or reading the hub, worded for the person at
 /// the terminal.
 #[derive(Debug)]
@@ -389,6 +447,20 @@ pub async fn graphs(hub: &str, session: &str) -> Result<GraphList, HubError> {
         SMALL_LIMIT,
     )
     .await
+}
+
+/// `GET /api/retrievals?session=`, from the hub at `host:port`: the
+/// session's retrieval records, oldest first.
+pub async fn retrievals(hub: &str, session: &str) -> Result<Vec<RetrievalRecord>, HubError> {
+    let url = transport::url(hub, "/api/retrievals");
+    let list: RetrievalList = get_json(
+        &transport::client(),
+        &url,
+        &[("session", session)],
+        SMALL_LIMIT,
+    )
+    .await?;
+    Ok(list.records)
 }
 
 /// Reaches the hub, lists its sessions, chooses one, checks it holds the
@@ -1123,6 +1195,64 @@ mod tests {
             Some(Read::Failed(m)) if m == "answer too large"
         ));
         assert!(EmbeddingsError::NoRoute.to_string().contains("older than"));
+    }
+
+    #[test]
+    fn the_retrieval_records_parse_in_the_contract_shape() {
+        let text = r#"{"records": [
+            {"record_id": "000000000002", "at": "2026-11-07T10:39:59.738344Z",
+             "tool": "epimemer.segment", "query": "content_length=1679", "graph": "g",
+             "retrieved": null, "response_text": "segmented", "truncated": false},
+            {"record_id": "000000000014", "at": "2026-11-07T11:57:02.781461Z",
+             "tool": "epimemer.store_decomposition", "query": "doc=d", "graph": "g",
+             "retrieved": [], "response_text": "", "truncated": false},
+            {"record_id": "000000000012", "at": "2026-11-07T11:31:36.954275+00:00",
+             "tool": "epimemer.search", "query": "query=bevy", "graph": "other",
+             "retrieved": [
+               {"node_id": "n1", "provenance": "lexical", "score": 7.5},
+               {"node_id": "n2", "provenance": "expanded", "score": null},
+               {"node_id": "n3", "provenance": "a_future_provenance"}
+             ],
+             "response_text": "three hits", "truncated": true, "a_field_from_the_future": 1}
+        ]}"#;
+        let list: RetrievalList = serde_json::from_str(text).unwrap();
+        let [undeclared, empty, search] = list.records.as_slice() else {
+            panic!("{list:?}")
+        };
+        assert_eq!(undeclared.retrieved, None, "null declares nothing");
+        assert_eq!(empty.retrieved, Some(Vec::new()), "an empty list is kept");
+        assert_eq!(
+            (
+                search.tool.as_str(),
+                search.graph.as_str(),
+                search.truncated
+            ),
+            ("epimemer.search", "other", true)
+        );
+        let nodes = search.retrieved.as_deref().unwrap();
+        assert_eq!(
+            nodes[0],
+            RetrievedNode {
+                node_id: "n1".into(),
+                provenance: "lexical".into(),
+                score: Some(7.5)
+            }
+        );
+        assert_eq!(
+            (nodes[1].score, nodes[2].provenance.as_str()),
+            (None, "a_future_provenance")
+        );
+    }
+
+    #[test]
+    fn a_retrieval_record_without_its_retrieved_field_is_an_error_naming_it() {
+        let text = r#"{"record_id": "000000000001", "at": "2026-11-07T10:00:00Z",
+            "tool": "epimemer.search", "query": "", "graph": "g",
+            "response_text": "", "truncated": false}"#;
+        let error = serde_json::from_str::<RetrievalRecord>(text)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("retrieved"), "{error}");
     }
 
     #[test]

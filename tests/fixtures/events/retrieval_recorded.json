@@ -1,0 +1,34 @@
+{
+  "event_type": "retrieval_recorded",
+  "category": "graph",
+  "graph": "fixture",
+  "session_id": "5e55e55e000040008000000000000001",
+  "timestamp": "2026-10-20T18:03:02.410000Z",
+  "record": {
+    "record_id": "000000000042",
+    "at": "2026-10-20T18:03:02.400000Z",
+    "tool": "epimemer.search",
+    "query": "query=swifts",
+    "graph": "fixture",
+    "retrieved": [
+      {
+        "node_id": "fac70000-0000-4000-8000-000000000001",
+        "provenance": "lexical",
+        "score": 4.25
+      },
+      {
+        "node_id": "1fe00000-0000-4000-8000-000000000001",
+        "provenance": "expanded",
+        "score": null
+      },
+      {
+        "node_id": "fac70000-0000-4000-8000-000000000009",
+        "provenance": "vector",
+        "score": 0.61
+      }
+    ],
+    "response_text": "Three nodes match swifts.",
+    "truncated": false
+  },
+  "seq": 15
+}

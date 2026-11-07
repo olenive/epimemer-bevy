@@ -6,7 +6,7 @@
 //! work. The hub it reads from, and the shapes it reads, are specified in the
 //! Epimemer repository's `dev-docs/VIZ_CONTRACT.md`.
 //!
-//! This is slices 1 to 10 of that order: it reads one graph's snapshot from
+//! This is slices 1 to 10 and 12 of that order: it reads one graph's snapshot from
 //! the hub and draws every node on a time axis, topics on a map fitted from
 //! their embeddings and saved (DESIGN.md §7) and claims around them, in
 //! recorded time as a disc at the moment it was recorded and in claim time
@@ -19,8 +19,10 @@
 //! DESIGN.md §9, and the edges of DESIGN.md §5: claim-to-claim lines on
 //! hover, on focus and with the edge toggle, and succession connectors
 //! always; the side panel, with the focused node in full, and the search
-//! field of DESIGN.md §10; and it follows the graph's event stream, applying
-//! each event as it comes (DESIGN.md §11). It builds for the browser as well
+//! field of DESIGN.md §10; it follows the graph's event stream, applying
+//! each event as it comes (DESIGN.md §11), and keeps the session's retrieval
+//! records, one of which the bar can choose to see what a tool call handed
+//! the agent (`retrieval.rs`). It builds for the browser as well
 //! as natively, from the same code: the reads and the stream run in the
 //! background over a transport each platform implements (`background.rs`,
 //! `hub.rs`, `stream.rs`), and in a browser the options come from the page's
@@ -58,6 +60,7 @@ mod projection;
 mod relax;
 mod relayout;
 mod reload;
+mod retrieval;
 mod scene;
 mod search;
 mod stream;
@@ -97,6 +100,7 @@ use crate::picking::PickPlugin;
 use crate::presets::{PRESET_NAMES, Preset};
 use crate::relayout::{MapState, RelayoutPlugin};
 use crate::reload::{Arrival, Catalogue, LoadStatus, Prepared, ReloadPlugin};
+use crate::retrieval::RetrievalPlugin;
 use crate::scene::{Nodes, ScenePlugin};
 use crate::search::{Search, SearchPlugin};
 use crate::stream::{Stream, Subscription};
@@ -150,13 +154,16 @@ Filters, which dim the nodes that fail them:
                       date or timestamp in UTC; a date as TO takes in that
                       whole day
   --source ID         only the nodes read from this document, by id
+  --retrieval RECORD  only the nodes this retrieval record retrieved, by its
+                      number, or latest for the graph's newest; chosen once
+                      the session's records are read
   --hide              hide the nodes that fail instead of dimming them:
                       they cannot be clicked and the views leave them out
 
   --ui-state STATE    how the bar starts: open (the default), collapsed,
                       or with a picker's list open: sessions, graphs,
                       metacontexts, topics, topics:PREFIX with PREFIX
-                      typed, or sources
+                      typed, sources, or retrievals
   --screenshot PATH   save a PNG of the view and the bar once the scene is
                       drawn, then exit
   --screenshot-after SECONDS
@@ -227,6 +234,9 @@ struct FilterArgs {
     /// From and to, in microseconds since the Unix epoch.
     window: Option<(i64, i64)>,
     source: Option<String>,
+    /// A retrieval record's number, or `latest`, chosen once the records
+    /// are read (`retrieval.rs`).
+    retrieval: Option<String>,
     hide: bool,
 }
 
@@ -307,6 +317,7 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Command, St
             "--topic" => args.filter.topic = Some(value()?),
             "--window" => args.filter.window = Some(parse_window(&value()?)?),
             "--source" => args.filter.source = Some(value()?),
+            "--retrieval" => args.filter.retrieval = Some(value()?),
             "--ui-state" => {
                 let state = value()?;
                 args.ui_state = bar::parse_ui_state(&state)
@@ -848,6 +859,9 @@ fn assemble(app: &mut App, args: Args, start: Start) {
         .add_plugins(LivePlugin {
             log_events: args.log_events,
         })
+        .add_plugins(RetrievalPlugin {
+            wanted: args.filter.retrieval.clone(),
+        })
         .insert_resource(status);
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -980,7 +994,7 @@ mod tests {
     #[test]
     fn the_filter_options_read_as_written() {
         let args = run(
-            "--kinds fact,Inferences --metacontext=the-real,night-city --topic Petritype --window 2026-10-14..2026-10-20 --source doc --hide",
+            "--kinds fact,Inferences --metacontext=the-real,night-city --topic Petritype --window 2026-10-14..2026-10-20 --source doc --retrieval latest --hide",
         );
         let filter = args.filter;
         assert_eq!(
@@ -997,6 +1011,7 @@ mod tests {
         );
         assert_eq!(filter.topic.as_deref(), Some("Petritype"));
         assert_eq!(filter.source.as_deref(), Some("doc"));
+        assert_eq!(filter.retrieval.as_deref(), Some("latest"));
         assert!(filter.hide);
         let day = |text: &str| hub::parse_timestamp(text).unwrap();
         assert_eq!(

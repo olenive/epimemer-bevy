@@ -13,7 +13,9 @@
 //! a node whose disc or column overlaps it. In claim time the window lies
 //! within the claim axis ([`clamp_window`]), and a node clipped to an end of
 //! the axis counts as standing at that end (`clip.rs`), so a window that
-//! reaches the end passes it.
+//! reaches the end passes it. A retrieval record ([`RetrievalFocus`]) passes
+//! the nodes it names, every node when it declares none, and no node when
+//! it declares an empty list (`retrieval.rs`).
 //!
 //! A change reaches the scene through Bevy's change detection. Whatever
 //! changes `Filter` through `ResMut<Filter>` marks it changed; in that
@@ -83,6 +85,17 @@ pub struct TimeWindow {
     pub to: f32,
 }
 
+/// The retrieval record chosen, as the filter needs it: its id, and the ids
+/// of the nodes it retrieved, copied from it so that the choice holds after
+/// the record is no longer kept (`retrieval.rs`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RetrievalFocus {
+    pub record_id: String,
+    /// `None` where the record declares nothing, which passes every node; an
+    /// empty set passes none.
+    pub retrieved: Option<BTreeSet<String>>,
+}
+
 /// What a node that fails the filter looks like.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
@@ -110,6 +123,8 @@ pub struct Filter {
     /// A document's id, the target of `sourced_from` edges: the nodes read
     /// from that document.
     pub source: Option<String>,
+    /// A retrieval record: the nodes it retrieved.
+    pub retrieval: Option<RetrievalFocus>,
     pub mode: Mode,
 }
 
@@ -209,6 +224,16 @@ pub fn describe(filter: &Filter, index: &GraphIndex) -> String {
     if let Some(source) = &filter.source {
         parts.push(format!("read from document {source}"));
     }
+    if let Some(focus) = &filter.retrieval {
+        parts.push(match &focus.retrieved {
+            Some(ids) => format!(
+                "retrieved by record {}, {} nodes",
+                focus.record_id,
+                ids.len()
+            ),
+            None => format!("record {}, which declares no nodes", focus.record_id),
+        });
+    }
     if parts.is_empty() {
         "no criterion".into()
     } else {
@@ -266,6 +291,19 @@ fn passes(filter: &Filter, index: &GraphIndex, subtree: Option<&Subtree>, i: usi
             .source
             .as_ref()
             .is_none_or(|document| index.sources[i].contains(document))
+        && filter
+            .retrieval
+            .as_ref()
+            .is_none_or(|focus| retrieval_passes(focus, &index.ids[i]))
+}
+
+/// Whether a node passes a retrieval record: it is named, or the record
+/// declares nothing.
+pub fn retrieval_passes(focus: &RetrievalFocus, id: &str) -> bool {
+    focus
+        .retrieved
+        .as_ref()
+        .is_none_or(|retrieved| retrieved.contains(id))
 }
 
 pub fn kind_passes(kinds: &Kinds, kind: Kind) -> bool {
@@ -658,6 +696,60 @@ mod tests {
         assert_eq!(pass(&from("doc-a")), ["filed", "tagged"]);
         assert_eq!(pass(&from("doc-b")), ["elsewhere"]);
         assert!(pass(&from("doc-c")).is_empty());
+    }
+
+    fn retrieved(ids: Option<&[&str]>) -> Filter {
+        Filter {
+            retrieval: Some(RetrievalFocus {
+                record_id: "000000000007".into(),
+                retrieved: ids.map(|ids| ids.iter().map(|&id| id.to_owned()).collect()),
+            }),
+            ..Filter::default()
+        }
+    }
+
+    #[test]
+    fn a_retrieval_record_passes_the_nodes_it_names() {
+        assert_eq!(
+            pass(&retrieved(Some(&["tagged", "parent", "not-drawn"]))),
+            ["parent", "tagged"],
+            "an id the graph does not hold passes nothing"
+        );
+        let index = index();
+        assert_eq!(
+            describe(&retrieved(Some(&["tagged", "parent"])), &index),
+            "retrieved by record 000000000007, 2 nodes"
+        );
+    }
+
+    #[test]
+    fn a_retrieval_record_that_declares_nothing_passes_every_node() {
+        assert_eq!(pass(&retrieved(None)).len(), 7);
+        assert_eq!(
+            shown(&retrieved(None), &index()),
+            shown(&Filter::default(), &index()),
+            "nothing dims"
+        );
+        assert_eq!(
+            describe(&retrieved(None), &index()),
+            "record 000000000007, which declares no nodes"
+        );
+    }
+
+    #[test]
+    fn a_retrieval_record_that_declares_an_empty_list_passes_none() {
+        assert!(pass(&retrieved(Some(&[]))).is_empty());
+        let index = index();
+        let dim = shown(&retrieved(Some(&[])), &index);
+        assert!(dim.visible.iter().all(|&v| v), "dimmed, still drawn");
+        let hide = shown(
+            &Filter {
+                mode: Mode::Hide,
+                ..retrieved(Some(&[]))
+            },
+            &index,
+        );
+        assert!(hide.visible.iter().all(|&v| !v), "hidden, every one");
     }
 
     #[test]

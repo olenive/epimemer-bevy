@@ -13,8 +13,9 @@
 //! reconnecting with the last error, or reading the graph again; the time mode,
 //! recorded time or claim time, which `C` switches too (`time_mode.rs`);
 //! the metacontexts, the node kinds, the status (active only, as the
-//! snapshot is); the topic subtree and the source document, each picked
-//! from a list; the time window, a range slider over the time axis of the
+//! snapshot is); the topic subtree, the source document and the retrieval
+//! record, each picked from a list, the last from the session's records of
+//! the graph drawn, newest first (`retrieval.rs`); the time window, a range slider over the time axis of the
 //! mode drawn (`bar/slider.rs`); dim or hide; the edge toggle, which `L`
 //! turns on and off too (`edges.rs`); the views; and Recalculate layout,
 //! which `U` presses too, and which fits the topic map again from the
@@ -74,6 +75,7 @@ use crate::live::{self, LiveState};
 use crate::pickers::{self, MetacontextEntry, Pickers, short_id};
 use crate::relayout::{self, MapState, RecalculateLayout};
 use crate::reload::{Catalogue, LoadGraph, LoadStatus};
+use crate::retrieval::{self, RetrievalRead, Retrievals};
 use crate::scene::kind_colour;
 use crate::search::{Search, SearchAction, SearchCount, SearchField};
 use crate::time_axis::TimeMode;
@@ -90,6 +92,7 @@ pub enum Picker {
     Metacontext,
     Topic,
     Source,
+    Retrieval,
 }
 
 /// How the bar starts, from `--ui-state`: open, collapsed, or open with a
@@ -104,7 +107,7 @@ pub enum UiState {
 
 /// The names `--ui-state` takes.
 pub const UI_STATES: &str =
-    "open, collapsed, sessions, graphs, metacontexts, topics, topics:PREFIX or sources";
+    "open, collapsed, sessions, graphs, metacontexts, topics, topics:PREFIX, sources or retrievals";
 
 /// Reads a `--ui-state` value.
 pub fn parse_ui_state(text: &str) -> Option<UiState> {
@@ -117,6 +120,7 @@ pub fn parse_ui_state(text: &str) -> Option<UiState> {
         ("graphs", true) => picker(Picker::Graph),
         ("metacontexts", true) => picker(Picker::Metacontext),
         ("sources", true) => picker(Picker::Source),
+        ("retrievals", true) => picker(Picker::Retrieval),
         ("topics", _) => Some(UiState::Picker(Picker::Topic, typed.to_owned())),
         _ => None,
     }
@@ -165,6 +169,7 @@ pub enum Control {
     Recalculate,
     ClearTopic,
     ClearSource,
+    ClearRetrieval,
     ClearWindow,
     /// Fit the current search hit's topic.
     SearchGo,
@@ -176,6 +181,8 @@ pub enum Control {
     Graph(String),
     Topic(String),
     Source(String),
+    /// A retrieval record, by its `record_id`.
+    Retrieval(String),
 }
 
 /// A text the bar keeps up to date.
@@ -186,6 +193,7 @@ enum BarText {
     Metacontexts,
     Topic,
     Source,
+    Retrieval,
     Mode,
     Window,
     /// The time window's caption, which names the time mode's axis.
@@ -245,6 +253,7 @@ const STATUS_HINT: &str = "The snapshot holds active nodes only, so every node i
 const RECORDED_HINT: &str = "Every node at the time it was recorded; C switches.";
 const EDGES_HINT: &str = "Every claim-to-claim edge between visible nodes, as lines. Without it, a node's edges show while it is hovered or focused.";
 const LIVE_HINT: &str = "The event stream from the hub: every change to the graph drawn appears as it is made, and the graph is read again after the stream drops or misses something.";
+const RETRIEVAL_HINT: &str = "The nodes one tool call handed the agent, from the session's retrieval records of this graph. A record whose tool declared nothing passes every node.";
 const SEARCH_HINT: &str = "Nodes whose text or description holds what is typed, ignoring case, among those drawn. / types here; Enter focuses the next hit, Shift+Enter the one before; Escape leaves the field.";
 
 /// The bar, its strip and its pickers.
@@ -267,6 +276,8 @@ impl Plugin for BarPlugin {
             .init_resource::<UiFocus>()
             .init_resource::<AllEdges>()
             .init_resource::<TimeMode>()
+            .init_resource::<Retrievals>()
+            .init_resource::<RetrievalRead>()
             .add_message::<SearchAction>()
             .add_message::<RecalculateLayout>()
             .add_observer(on_click)
@@ -368,6 +379,10 @@ fn is_selected(
         }
         Control::Topic(id) => filter.topic.as_deref() == Some(id.as_str()),
         Control::Source(id) => filter.source.as_deref() == Some(id.as_str()),
+        Control::Retrieval(id) => filter
+            .retrieval
+            .as_ref()
+            .is_some_and(|focus| focus.record_id == *id),
         _ => false,
     }
 }
@@ -382,6 +397,7 @@ struct Act<'w> {
     mode: ResMut<'w, TimeMode>,
     catalogue: ResMut<'w, Catalogue>,
     pickers: Res<'w, Pickers>,
+    retrievals: Res<'w, Retrievals>,
     views: MessageWriter<'w, ViewRequest>,
     loads: MessageWriter<'w, LoadGraph>,
     search: MessageWriter<'w, SearchAction>,
@@ -447,6 +463,14 @@ fn perform(control: &Control, act: &mut Act) {
                 act.filter.source = None;
             }
         }
+        Control::ClearRetrieval => {
+            if act.filter.retrieval.is_some() {
+                act.filter.retrieval = None;
+            }
+            if act.open.0 == Some(Picker::Retrieval) {
+                act.open.0 = None;
+            }
+        }
         Control::ClearWindow => {
             if act.filter.window.is_some() {
                 act.filter.window = None;
@@ -487,6 +511,12 @@ fn perform(control: &Control, act: &mut Act) {
         }
         Control::Source(id) => {
             act.filter.source = Some(id.clone());
+            act.open.0 = None;
+        }
+        Control::Retrieval(id) => {
+            if let Some(record) = act.retrievals.records.get(id) {
+                act.filter.retrieval = Some(retrieval::focus_of(record));
+            }
             act.open.0 = None;
         }
     }
@@ -761,10 +791,13 @@ struct PanelData<'w> {
     prefix: Res<'w, TopicPrefix>,
     fetches: Res<'w, Fetches>,
     notice: Res<'w, Notice>,
+    retrievals: Res<'w, Retrievals>,
+    read: Res<'w, RetrievalRead>,
 }
 
 /// Rebuilds the open picker's list when the picker opens, or when what it
-/// lists changes: a session or graph list read, or a new graph drawn.
+/// lists changes: a session or graph list read, a retrieval record kept or
+/// read, or a new graph drawn.
 fn rebuild_panel(
     mut commands: Commands,
     data: PanelData,
@@ -772,9 +805,11 @@ fn rebuild_panel(
     anchors: Query<(Entity, &Anchor)>,
 ) {
     let lists_hub = matches!(data.open.0, Some(Picker::Session | Picker::Graph));
+    let lists_records = data.open.0 == Some(Picker::Retrieval);
     let changed = data.open.is_changed()
         || data.pickers.is_changed()
-        || (lists_hub && (data.catalogue.is_changed() || data.fetches.is_changed()));
+        || (lists_hub && (data.catalogue.is_changed() || data.fetches.is_changed()))
+        || (lists_records && (data.retrievals.is_changed() || data.read.is_changed()));
     if !changed {
         return;
     }
@@ -787,6 +822,15 @@ fn rebuild_panel(
     let Some((anchor, _)) = anchors.iter().find(|(_, a)| a.0 == picker) else {
         return;
     };
+    let records = if lists_records {
+        retrieval::entries(
+            &data.retrievals,
+            &data.catalogue.session.session_id,
+            &data.catalogue.graph,
+        )
+    } else {
+        Vec::new()
+    };
     let content = panels::Content {
         catalogue: &data.catalogue,
         pickers: &data.pickers,
@@ -794,6 +838,9 @@ fn rebuild_panel(
         reading_sessions: data.fetches.sessions.is_some(),
         reading_graphs: data.fetches.graphs.is_some(),
         notice: data.notice.0.as_deref(),
+        records: &records,
+        reading_records: data.read.pending.is_some(),
+        records_error: data.read.error.as_deref(),
     };
     panels::spawn(&mut commands, anchor, picker, &content);
 }
@@ -901,6 +948,7 @@ struct TextData<'w, 's> {
     notice: Res<'w, Notice>,
     map: Option<Res<'w, MapState>>,
     live: Option<Res<'w, LiveState>>,
+    retrievals: Option<Res<'w, Retrievals>>,
     hints: Query<'w, 's, (&'static Interaction, &'static Hint)>,
 }
 
@@ -936,6 +984,13 @@ fn update_texts(data: TextData, mut texts: Query<(&BarText, &mut Text, &mut Text
                     .source
                     .as_deref()
                     .map_or_else(|| "any".to_owned(), |id| short_id(id).to_owned()),
+                style::TEXT,
+            ),
+            BarText::Retrieval => (
+                retrieval::button_label(
+                    data.filter.retrieval.as_ref(),
+                    data.retrievals.as_deref().unwrap_or(&Retrievals::default()),
+                ),
                 style::TEXT,
             ),
             BarText::Mode => (
@@ -1236,6 +1291,16 @@ fn spawn_bar(mut commands: Commands, collapsed: Res<Collapsed>, search: Option<R
             ),
             (
                 style::group_node(),
+                Interaction::default(),
+                Hint(RETRIEVAL_HINT),
+                children![
+                    caption("Retrieval"),
+                    opener(Picker::Retrieval, BarText::Retrieval),
+                    button("Clear", Control::ClearRetrieval),
+                ],
+            ),
+            (
+                style::group_node(),
                 children![
                     (
                         BarText::WindowCaption,
@@ -1356,6 +1421,19 @@ mod tests {
             .insert_resource(Pickers {
                 metacontexts: listed(&["a", "b"]),
                 ..Pickers::default()
+            })
+            .insert_resource({
+                let mut store = Retrievals::default();
+                retrieval::remember(
+                    &mut store,
+                    "s1",
+                    [crate::retrieval::tests::record(
+                        7,
+                        "memory",
+                        Some(&["n1", "n2"]),
+                    )],
+                );
+                store
             })
             .insert_resource(Catalogue {
                 hub: "127.0.0.1:1".into(),
@@ -1487,6 +1565,48 @@ mod tests {
         let clear = control(&mut app, &Control::ClearSource);
         click(&mut app, clear);
         assert_eq!(app.world().resource::<Filter>().source, None);
+    }
+
+    #[test]
+    fn a_retrieval_record_is_chosen_from_its_row_and_cleared() {
+        let mut app = app();
+        app.world_mut().resource_mut::<OpenPicker>().0 = Some(Picker::Retrieval);
+        let row = spawn(&mut app, Control::Retrieval("000000000007".into()));
+        click(&mut app, row);
+        let focus = app.world().resource::<Filter>().retrieval.clone();
+        assert_eq!(
+            focus,
+            Some(crate::filter::RetrievalFocus {
+                record_id: "000000000007".into(),
+                retrieved: Some(["n1".to_owned(), "n2".to_owned()].into()),
+            })
+        );
+        assert_eq!(
+            app.world().resource::<OpenPicker>().0,
+            None,
+            "chosen, closed"
+        );
+        let catalogue = app.world().resource::<Catalogue>().clone();
+        let filter = app.world().resource::<Filter>().clone();
+        let selected = |id: &str| {
+            is_selected(
+                &Control::Retrieval(id.into()),
+                &filter,
+                &catalogue,
+                OpenPicker(None),
+                AllEdges(false),
+                TimeMode::Recorded,
+            )
+        };
+        assert!(selected("000000000007") && !selected("000000000008"));
+        let clear = control(&mut app, &Control::ClearRetrieval);
+        click(&mut app, clear);
+        assert_eq!(app.world().resource::<Filter>().retrieval, None);
+
+        // A row whose record is no longer kept chooses nothing.
+        let gone = spawn(&mut app, Control::Retrieval("000000000001".into()));
+        click(&mut app, gone);
+        assert_eq!(app.world().resource::<Filter>().retrieval, None);
     }
 
     #[test]
@@ -1789,6 +1909,10 @@ mod tests {
         assert_eq!(
             parse_ui_state("sources"),
             Some(UiState::Picker(Picker::Source, String::new()))
+        );
+        assert_eq!(
+            parse_ui_state("retrievals"),
+            Some(UiState::Picker(Picker::Retrieval, String::new()))
         );
         assert_eq!(parse_ui_state("sources:x"), None, "only topics take text");
         assert_eq!(parse_ui_state("sideways"), None);

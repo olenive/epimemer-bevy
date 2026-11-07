@@ -21,9 +21,11 @@
 //!
 //! Parsing is a pure function, [`parse`], so that every message shape is
 //! checked on recorded JSON without a hub. The messages this client acts on
-//! are read into the contract's own structs (`hub.rs`); every other event,
-//! the pipeline events, the acts, the advisories, the retrieval records and
-//! any type added later, is [`Event::Other`], received and dropped. A
+//! are read into the contract's own structs (`hub.rs`), the retrieval
+//! records among them, which `live.rs` keeps for the Retrieval picker
+//! (`retrieval.rs`); every other event, the pipeline events, the acts, the
+//! advisories and any type added later, is [`Event::Other`], received and
+//! dropped. A
 //! message's `seq` is kept whatever it is, since a gap in it means events
 //! were lost. The hub is plain `ws://` on loopback (VIZ_CONTRACT.md §2), so
 //! the native client has no TLS.
@@ -44,7 +46,7 @@ use serde_json::{Map, Value};
 use web_time::Instant;
 
 use crate::background;
-use crate::hub::{EdgeView, NodeView, SessionInfo, TimelineView};
+use crate::hub::{EdgeView, NodeView, RetrievalRecord, SessionInfo, TimelineView};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
@@ -143,6 +145,8 @@ pub enum Event {
         previous_graph: String,
         new_graph: String,
     },
+    /// A tool answered: what it handed the agent.
+    RetrievalRecorded(Box<RetrievalRecord>),
     /// An event this client receives and does not act on.
     Other,
     /// An event this client acts on whose body does not read: the shape
@@ -239,6 +243,9 @@ pub fn parse(text: &str) -> Message {
         "node_status_changed" => {
             read(serde_json::from_value(value.clone()).map(Event::NodeStatusChanged))
         }
+        "retrieval_recorded" => read(
+            serde_json::from_value(field("record")).map(|r| Event::RetrievalRecorded(Box::new(r))),
+        ),
         "graph_switched" => {
             read(
                 serde_json::from_value::<Switched>(value.clone()).map(|s| Event::GraphSwitched {
@@ -550,6 +557,54 @@ mod tests {
                 new_graph: "fixture".into()
             }
         );
+    }
+
+    #[test]
+    fn a_retrieval_record_reads_in_the_contract_shape() {
+        let (seq, recorded) = event("retrieval_recorded");
+        assert_eq!(seq, Some(15));
+        assert_eq!(
+            (recorded.session_id.as_str(), recorded.graph.as_str()),
+            (SESSION, "fixture")
+        );
+        let Event::RetrievalRecorded(record) = recorded.event else {
+            panic!("{:?}", recorded.event)
+        };
+        assert_eq!(
+            (
+                record.record_id.as_str(),
+                record.tool.as_str(),
+                record.graph.as_str()
+            ),
+            ("000000000042", "epimemer.search", "fixture")
+        );
+        assert_eq!(record.at, "2026-10-20T18:03:02.400000Z");
+        let retrieved = record.retrieved.as_deref().unwrap();
+        assert_eq!(retrieved.len(), 3);
+        assert_eq!(
+            (retrieved[1].provenance.as_str(), retrieved[1].score),
+            ("expanded", None)
+        );
+        assert!(!record.truncated);
+
+        let undeclared = r#"{"event_type": "retrieval_recorded", "graph": "g", "session_id": "s",
+            "record": {"record_id": "000000000001", "at": "2026-11-07T10:00:00Z",
+              "tool": "epimemer.segment", "query": "", "graph": "g", "retrieved": null,
+              "response_text": "", "truncated": false}, "seq": 2}"#;
+        let Message::Event { envelope, .. } = parse(undeclared) else {
+            panic!()
+        };
+        assert!(
+            matches!(&envelope.event, Event::RetrievalRecorded(r) if r.retrieved.is_none()),
+            "{:?}",
+            envelope.event
+        );
+        let broken = r#"{"event_type": "retrieval_recorded", "graph": "g", "session_id": "s",
+            "record": {"record_id": "000000000001"}, "seq": 3}"#;
+        let Message::Event { envelope, .. } = parse(broken) else {
+            panic!()
+        };
+        assert!(matches!(envelope.event, Event::Unreadable(_)));
     }
 
     #[test]
