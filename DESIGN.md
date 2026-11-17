@@ -5,7 +5,7 @@ Epimemer repository and moved here the day this repository was created;
 this file is the design's only home. Slices 1 to 10 of §14 are built
 (2026-10-21), slice 11 waits on its Petritype prerequisites, and slices 12
 to 15 were added on 2026-11-07, when the owner decided this client replaces
-the dashboard (§1); slices 12 and 13 were built the same day. The numbers in §3 were measured on the development graph
+the dashboard (§1); slices 12 and 13 were built the same day. Slice 16 was added on 2026-11-17, when the owner asked for a cheatsheet in the client and a mouse that pans and zooms. The numbers in §3 were measured on the development graph
 on 2026-10-18, through the hub described in `VIZ_CONTRACT.md`, which is the
 only surface this client depends on. `VIZ_CONTRACT.md` throughout means
 `dev-docs/VIZ_CONTRACT.md` in the Epimemer repository.
@@ -317,6 +317,19 @@ tween so the user keeps their bearings. Presets are stable because the
 layout is (§7), so "the Petritype topic from the south-east" means the same
 thing tomorrow.
 
+The mouse moves the view the way a map does (slice 16). A left drag pans:
+the camera moves across its own view plane so that the point of the scene
+under the pointer stays under it, measured at the depth the camera looks
+at in perspective and exactly in an orthographic view. The wheel zooms
+towards the pointer: in perspective the camera moves along the ray through
+the pointer, in an orthographic view the view narrows about the point
+under the pointer, and either way the depth the camera looks at follows. A
+right drag looks around, as before. A press that moves more than a few
+pixels before its release is a drag and never a click, so panning from a
+disc neither focuses it nor clears the focus. The wheel with Shift held
+changes how fast the keys move the camera, which was the wheel's only job
+before; over the bar or the side panel the wheel scrolls that, as before.
+
 ## 7. Layout
 
 The layout has to satisfy three things at once: it must be stable, so that
@@ -515,6 +528,7 @@ The set is fixed; a filter not on this list is a design change:
 | Recalculate layout | §7. |
 | Side panel | The focused node in full, its edges by class, its timepoints, its validity brackets, and the connectors' far ends by name. |
 | Log | The session's acts, advisories and pipeline runs, newest first, filtered by kind, in place of the side panel's node (slice 13). |
+| Cheatsheet | The controls, what the colours mean and the concepts drawn, in place of the side panel's node (slice 16). |
 
 Filtering dims rather than removes by default (§8), with a "hide" variant
 for when the user wants the filtered-out nodes gone from the budget and the
@@ -585,6 +599,21 @@ entry is kept once by its `action_id`, for the session followed across
 switches of graph, and the log is emptied on a switch to another session,
 since ids are counted per session. `--ui-state log` opens it from the
 start.
+
+The cheatsheet (slice 16). `?`, or the bar's Help button, shows the
+cheatsheet in place of the side panel's node, at the panel's width and
+scrolled as the panel is, and the same key or button returns the panel to
+what it showed. It has three parts. The controls: the mouse, then every
+key, made from the key map that `--help` prints, so the two cannot differ.
+The colours: each entry is written in the colour it explains, taken from
+the function the scene itself colours with: the three kinds of disc, the
+relations of claim-to-claim lines, the two succession connectors, "now",
+the validity brackets, and what dimming means. The concepts, a few lines
+each: topic node, fact and inference; the map, where topics are placed by
+meaning; height as time, in recorded time and in claim time; succession;
+metacontext; focus, filters, retrievals and the log; session and graph.
+The text is for somebody who has not read this design, and says nothing
+the scene does not draw. `--ui-state help` opens it from the start.
 
 The reflect counter (slice 13). The bar shows `reflect N/M`: the stores
 since the last reflect against the threshold at which reflect is
@@ -896,6 +925,15 @@ deliberately small: it is the test of whether the picture is legible at all.
     starts, as for every slice. Acceptance: a graph of two thousand nodes is
     readable at the overview in the browser build, the fps holds, zooming
     in reveals the claims without moving anything, and `just check` passes.
+16. **Cheatsheet and a map's mouse.** The cheatsheet of §10 in the side
+    panel, on `?` and a Help button in the bar; a left drag that pans and a
+    wheel that zooms towards the pointer, with the wheel's change of speed
+    moved to Shift and the wheel (§6). Built before slice 15, at the
+    owner's request on 2026-11-17. Acceptance: in the browser build `?`
+    opens and closes the cheatsheet and its colours match the scene; a left
+    drag pans in all three presets without focusing or clearing; the wheel
+    zooms in and out about the pointer in all three; a click still focuses;
+    `just check` passes.
 
 ## 15. Risks
 
