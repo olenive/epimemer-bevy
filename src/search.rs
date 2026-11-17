@@ -20,6 +20,7 @@
 //! or the graph changes; the hit walked to last is kept, by its id, while
 //! it is still a hit, and a new text starts the walk again from the first.
 
+use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::picking::hover::HoverMap;
 use bevy::picking::pointer::PointerId;
@@ -31,7 +32,7 @@ use crate::camera::ViewRequest;
 use crate::filter::{RefreshShown, Shown, is_visible};
 use crate::focus::Focus;
 use crate::graph_index::GraphIndex;
-use crate::keys::{CLEAR_FOCUS_KEY, GO_KEY, SEARCH_KEY, WALK_KEYS};
+use crate::keys::{CLEAR_FOCUS_KEY, GO_KEY, WALK_KEYS, question_mark_typed, search_pressed};
 use crate::ui_focus::UiFocus;
 
 /// What is searched for, and what it finds.
@@ -77,6 +78,7 @@ impl Plugin for SearchPlugin {
             .init_resource::<OpenPicker>()
             .add_message::<SearchAction>()
             .add_message::<ViewRequest>()
+            .add_message::<KeyboardInput>()
             .add_systems(
                 Update,
                 (
@@ -224,15 +226,18 @@ fn read_field(fields: Query<&EditableText, With<SearchField>>, mut search: ResMu
 
 /// `/` from the scene gives the field the keyboard, opening the bar first
 /// if it is collapsed. The key itself is not typed: the field reads the
-/// keys sent to it from the next update.
+/// keys sent to it from the next update. With Shift held, or on a layout
+/// where that key types `?`, it shows the cheatsheet instead (`panel.rs`).
 fn take_keyboard(
     keys: Res<ButtonInput<KeyCode>>,
+    mut typed: MessageReader<KeyboardInput>,
     ui: Res<UiFocus>,
     fields: Query<Entity, With<SearchField>>,
     input: Option<ResMut<InputFocus>>,
     mut collapsed: ResMut<Collapsed>,
 ) {
-    if ui.typing || !keys.just_pressed(SEARCH_KEY.0) {
+    let question_mark = question_mark_typed(typed.read());
+    if ui.typing || !search_pressed(&keys, question_mark) {
         return;
     }
     let (Some(field), Some(mut input)) = (the_field(&fields), input) else {
@@ -597,6 +602,18 @@ mod tests {
         tap(&mut app, &[KeyCode::Escape]);
         assert_eq!(app.world().resource::<InputFocus>().get(), None);
         app.insert_resource(Collapsed(true));
+        tap(&mut app, &[KeyCode::ShiftLeft, KeyCode::Slash]);
+        assert_eq!(
+            app.world().resource::<InputFocus>().get(),
+            None,
+            "? shows the cheatsheet and does not search"
+        );
+        assert!(app.world().resource::<Collapsed>().0);
+        // A layout where the `/` key types `?` without Shift.
+        app.world_mut()
+            .write_message(crate::keys::tests::typed(KeyCode::Slash, "?", false));
+        tap(&mut app, &[KeyCode::Slash]);
+        assert_eq!(app.world().resource::<InputFocus>().get(), None);
         tap(&mut app, &[KeyCode::Slash]);
         assert_eq!(app.world().resource::<InputFocus>().get(), Some(field));
         assert!(!app.world().resource::<Collapsed>().0, "the bar opens");

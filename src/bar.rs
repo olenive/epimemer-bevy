@@ -13,7 +13,9 @@
 //! reconnecting with the last error, or reading the graph again; the graph
 //! drawn's reflect counter (`reflect_counter.rs`); the Log button, which `J`
 //! presses too, and which shows the log in the side panel or returns the
-//! panel to the node (`event_log.rs`); the time mode,
+//! panel to the node (`event_log.rs`); the Help button, which `?` presses
+//! too, and which shows the cheatsheet in the side panel or returns the
+//! panel to what it showed (`cheatsheet.rs`); the time mode,
 //! recorded time or claim time, which `C` switches too (`time_mode.rs`);
 //! the metacontexts, the node kinds, the status (active only, as the
 //! snapshot is); the topic subtree, the source document and the retrieval
@@ -48,7 +50,7 @@
 //! The bar is UI, so Bevy's UI picking backend ranks it above every mesh
 //! and each of its nodes blocks what is beneath: a click on the bar never
 //! picks a disc. The wheel over the bar scrolls the bar's lists rather than
-//! changing the camera's speed (`ui_focus.rs`). The bar reports how much of
+//! zooming the camera (`ui_focus.rs`). The bar reports how much of
 //! the window it covers as [`BarCover`], and every view is fitted to the
 //! part below it.
 
@@ -68,12 +70,15 @@ use bevy::ui::{InteractionDisabled, UiSystems};
 
 use crate::background::{Pending, Poll, in_background, poll};
 use crate::camera::{BarCover, ViewRequest};
+use crate::cheatsheet::{HelpOpen, PanelShows, press_help, press_log};
 use crate::edges::AllEdges;
-use crate::event_log::{LogOpen, toggle_log};
+use crate::event_log::LogOpen;
 use crate::filter::{Filter, Kinds, Metacontexts, Mode, kind_passes};
 use crate::graph_index::GraphIndex;
 use crate::hub::{self, GraphList, SessionInfo};
-use crate::keys::{BAR_KEY, EDGE_KEY, GO_KEY, LOG_KEY, RECALCULATE_KEY, SEARCH_KEY, VIEW_KEYS};
+use crate::keys::{
+    BAR_KEY, EDGE_KEY, GO_KEY, HELP_KEY, LOG_KEY, RECALCULATE_KEY, SEARCH_KEY, VIEW_KEYS,
+};
 use crate::layout::Kind;
 use crate::live::{self, LiveState};
 use crate::panel::PanelCollapsed;
@@ -85,7 +90,7 @@ use crate::retrieval::{self, RetrievalRead, Retrievals};
 use crate::scene::kind_colour;
 use crate::search::{Search, SearchAction, SearchCount, SearchField};
 use crate::time_axis::TimeMode;
-use crate::ui_focus::{UiFocus, over_ui};
+use crate::ui_focus::{UiFocus, is_ui, over_ui};
 
 /// How wide the search field is, in logical pixels.
 const SEARCH_WIDTH: f32 = 180.0;
@@ -103,7 +108,7 @@ pub enum Picker {
 
 /// How the bar starts, from `--ui-state`: open, collapsed, open with a
 /// picker's list open, and for the topic picker, something typed, or open
-/// with the log shown in the side panel.
+/// with the log or the cheatsheet shown in the side panel.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum UiState {
     #[default]
@@ -111,10 +116,11 @@ pub enum UiState {
     Collapsed,
     Picker(Picker, String),
     Log,
+    Help,
 }
 
 /// The names `--ui-state` takes.
-pub const UI_STATES: &str = "open, collapsed, sessions, graphs, metacontexts, topics, topics:PREFIX, sources, retrievals or log";
+pub const UI_STATES: &str = "open, collapsed, sessions, graphs, metacontexts, topics, topics:PREFIX, sources, retrievals, log or help";
 
 /// Reads a `--ui-state` value.
 pub fn parse_ui_state(text: &str) -> Option<UiState> {
@@ -129,6 +135,7 @@ pub fn parse_ui_state(text: &str) -> Option<UiState> {
         ("sources", true) => picker(Picker::Source),
         ("retrievals", true) => picker(Picker::Retrieval),
         ("log", true) => Some(UiState::Log),
+        ("help", true) => Some(UiState::Help),
         ("topics", _) => Some(UiState::Picker(Picker::Topic, typed.to_owned())),
         _ => None,
     }
@@ -177,6 +184,9 @@ pub enum Control {
     Recalculate,
     /// Show the log in the side panel, or return the panel to the node.
     Log,
+    /// Show the cheatsheet in the side panel, or return the panel to what
+    /// it showed.
+    Help,
     ClearTopic,
     ClearSource,
     ClearRetrieval,
@@ -241,7 +251,7 @@ struct Panel;
 
 /// The topic picker's text field.
 #[derive(Component)]
-struct TopicField;
+pub(crate) struct TopicField;
 
 /// A row of the topic picker, by its place in `Pickers::topics`.
 #[derive(Component)]
@@ -268,6 +278,7 @@ const LIVE_HINT: &str = "The event stream from the hub: every change to the grap
 const RETRIEVAL_HINT: &str = "The nodes one tool call handed the agent, from the session's retrieval records of this graph. A record whose tool declared nothing passes every node.";
 const REFLECT_HINT: &str = "Stores since this graph's last reflect, against the count at which reflect is suggested. The hub reports it for the session's active graph only, so another graph shows a dash.";
 const LOG_HINT: &str = "The session's acts, advisories and pipeline runs, newest first, in the side panel in place of the focused node; J does the same, and again returns to the node.";
+const HELP_HINT: &str = "A cheatsheet of the controls, the colours and the concepts drawn, in the side panel in place of the focused node; ? does the same, and again returns the panel to what it showed.";
 const SEARCH_HINT: &str = "Nodes whose text or description holds what is typed, ignoring case, among those drawn. / types here; Enter focuses the next hit, Shift+Enter the one before; Escape leaves the field.";
 
 /// The bar, its strip and its pickers.
@@ -278,12 +289,15 @@ pub struct BarPlugin {
 impl Plugin for BarPlugin {
     fn build(&self, app: &mut App) {
         let (collapsed, open, typed) = match &self.start {
-            UiState::Open | UiState::Log => (false, None, String::new()),
+            UiState::Open | UiState::Log | UiState::Help => (false, None, String::new()),
             UiState::Collapsed => (true, None, String::new()),
             UiState::Picker(picker, typed) => (false, Some(*picker), typed.clone()),
         };
         if self.start == UiState::Log {
             app.insert_resource(LogOpen(true));
+        }
+        if self.start == UiState::Help {
+            app.insert_resource(HelpOpen(true));
         }
         app.insert_resource(Collapsed(collapsed))
             .insert_resource(OpenPicker(open))
@@ -296,6 +310,7 @@ impl Plugin for BarPlugin {
             .init_resource::<Retrievals>()
             .init_resource::<RetrievalRead>()
             .init_resource::<LogOpen>()
+            .init_resource::<HelpOpen>()
             .init_resource::<PanelCollapsed>()
             .init_resource::<ReflectCounter>()
             .add_message::<SearchAction>()
@@ -418,8 +433,7 @@ struct Act<'w> {
     catalogue: ResMut<'w, Catalogue>,
     pickers: Res<'w, Pickers>,
     retrievals: Res<'w, Retrievals>,
-    log: ResMut<'w, LogOpen>,
-    panel: ResMut<'w, PanelCollapsed>,
+    shows: PanelShows<'w>,
     views: MessageWriter<'w, ViewRequest>,
     loads: MessageWriter<'w, LoadGraph>,
     search: MessageWriter<'w, SearchAction>,
@@ -465,9 +479,12 @@ fn perform(control: &Control, act: &mut Act) {
             });
         }
         Control::Log => {
-            let (open, collapsed) = toggle_log(act.log.0, act.panel.0);
-            act.log.set_if_neq(LogOpen(open));
-            act.panel.set_if_neq(PanelCollapsed(collapsed));
+            let next = press_log(act.shows.choice());
+            act.shows.set(next);
+        }
+        Control::Help => {
+            let next = press_help(act.shows.choice());
+            act.shows.set(next);
         }
         Control::Kind(kind) => act.filter.kinds = toggle_kind(act.filter.kinds, *kind),
         Control::Mode => {
@@ -608,17 +625,25 @@ pub fn next_input_focus(
 
 /// Works out who has the pointer and the keyboard, by
 /// [`next_input_focus`]: the pointer is the UI's while it is over the bar,
-/// one of its lists or the side panel, and the keyboard is a text field's
-/// while one holds the input focus.
-fn track_focus(
+/// one of its lists or the side panel, the words of a span of text among
+/// them ([`is_ui`]), and the keyboard is a text field's while one holds the
+/// input focus.
+pub(crate) fn track_focus(
     hover: Option<Res<HoverMap>>,
     nodes: Query<(), With<ComputedNode>>,
+    parents: Query<&ChildOf>,
     fields: Query<Entity, With<TopicField>>,
     editable: Query<(), With<EditableText>>,
     input_focus: Option<ResMut<InputFocus>>,
     mut focus: ResMut<UiFocus>,
 ) {
-    let pointer_over_ui = over_ui(hovered(hover.as_deref()), |e| nodes.contains(e));
+    let pointer_over_ui = over_ui(hovered(hover.as_deref()), |e| {
+        is_ui(
+            e,
+            |e| nodes.contains(e),
+            |e| parents.get(e).ok().map(ChildOf::parent),
+        )
+    });
     let mut typing = false;
     if let Some(mut input_focus) = input_focus {
         let field = fields.iter().next();
@@ -930,29 +955,31 @@ type StyledControl = (
     Has<Row>,
 );
 
-/// Whether the log is what the side panel shows.
+/// Whether the log or the cheatsheet is what the side panel shows.
 #[derive(SystemParam)]
-struct LogShown<'w> {
+struct PanelShown<'w> {
     log: Res<'w, LogOpen>,
+    help: Res<'w, HelpOpen>,
     panel: Res<'w, PanelCollapsed>,
 }
 
 /// Colours every control by whether it is chosen, under the pointer, or
 /// unable to do anything yet. The Log button is chosen while the panel
-/// shows the log.
+/// shows the log, and the Help button while it shows the cheatsheet.
 fn style_controls(
     filter: Res<Filter>,
     catalogue: Res<Catalogue>,
     open: Res<OpenPicker>,
     edges: Res<AllEdges>,
     mode: Res<TimeMode>,
-    shown: LogShown,
+    shown: PanelShown,
     mut controls: Query<StyledControl>,
 ) {
     for (control, interaction, mut background, disabled, row) in &mut controls {
         let rest = if row { style::ROW } else { style::BUTTON };
         let selected = match control {
-            Control::Log => shown.log.0 && !shown.panel.0,
+            Control::Log => shown.log.0 && !shown.help.0 && !shown.panel.0,
+            Control::Help => shown.help.0 && !shown.panel.0,
             _ => is_selected(control, &filter, &catalogue, *open, *edges, *mode),
         };
         let colour =
@@ -1294,6 +1321,7 @@ fn spawn_bar(mut commands: Commands, collapsed: Res<Collapsed>, search: Option<R
                 children![(BarText::Reflect, style::text("", style::TEXT))],
             ),
             hinted_button(&format!("Log ({})", LOG_KEY.1), Control::Log, LOG_HINT),
+            hinted_button(&format!("Help ({})", HELP_KEY.1), Control::Help, HELP_HINT),
             (
                 style::group_node(),
                 children![
@@ -1468,6 +1496,13 @@ mod tests {
     /// The bar's controls and the click observer, with no window and no
     /// renderer.
     fn app() -> App {
+        let mut app = unstarted();
+        app.update();
+        app
+    }
+
+    /// The same before its first update, for a test that adds to it.
+    fn unstarted() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<ViewRequest>()
@@ -1480,6 +1515,7 @@ mod tests {
             .init_resource::<AllEdges>()
             .init_resource::<TimeMode>()
             .init_resource::<LogOpen>()
+            .init_resource::<HelpOpen>()
             .init_resource::<PanelCollapsed>()
             .insert_resource(Pickers {
                 metacontexts: listed(&["a", "b"]),
@@ -1511,8 +1547,59 @@ mod tests {
         // A click climbs through `PointerTraversal`, which looks for a
         // window too, so the component must be known even with no window.
         app.world_mut().register_component::<Window>();
-        app.update();
         app
+    }
+
+    /// Whether the bar, run on what picking reports under the mouse, finds
+    /// the pointer over the UI with `entity` alone under it.
+    fn over_ui_with(app: &mut App, entity: Entity) -> bool {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut hover = HoverMap::default();
+        hover
+            .entry(PointerId::Mouse)
+            .or_default()
+            .insert(entity, HitData::new(entity, 0.0, None, None));
+        app.insert_resource(hover);
+        app.world_mut().run_system_once(track_focus).unwrap();
+        app.world().resource::<UiFocus>().pointer_over_ui
+    }
+
+    #[test]
+    fn the_pointer_over_any_part_of_the_bar_a_list_or_the_panel_belongs_to_the_ui() {
+        use crate::panel::PanelPlugin;
+        let mut app = unstarted();
+        // The panel on the cheatsheet, whose concepts are texts of spans, and
+        // the metacontext list open under the bar.
+        app.insert_resource(HelpOpen(true))
+            .insert_resource(OpenPicker(Some(Picker::Metacontext)))
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<TopicPrefix>()
+            .init_resource::<Fetches>()
+            .init_resource::<Notice>()
+            .init_resource::<RetrievalRead>()
+            .add_plugins(PanelPlugin)
+            .add_systems(Update, rebuild_panel);
+        app.update();
+        app.update();
+        assert_eq!(
+            app.world_mut().query::<&Panel>().iter(app.world()).count(),
+            1
+        );
+
+        let mut parts = app
+            .world_mut()
+            .query_filtered::<(Entity, Has<TextSpan>), Or<(With<Node>, With<TextSpan>)>>();
+        let parts: Vec<(Entity, bool)> = parts.iter(app.world()).collect();
+        let spans = parts.iter().filter(|(_, span)| *span).count();
+        assert!(
+            spans >= crate::cheatsheet::CONCEPTS.len() * 2,
+            "the concepts' spans"
+        );
+        for (entity, span) in parts {
+            assert!(over_ui_with(&mut app, entity), "{entity:?}, a span: {span}");
+        }
+        let disc = app.world_mut().spawn_empty().id();
+        assert!(!over_ui_with(&mut app, disc), "the scene is not");
     }
 
     /// A left click on an entity, as the picking backend sends it.
@@ -1727,6 +1814,44 @@ mod tests {
             ),
             (true, false)
         );
+    }
+
+    #[test]
+    fn the_help_button_shows_the_cheatsheet_and_again_returns_the_panel_to_what_it_showed() {
+        let mut app = app();
+        let help = control(&mut app, &Control::Help);
+        let log = control(&mut app, &Control::Log);
+        let shows = |app: &App| {
+            (
+                app.world().resource::<LogOpen>().0,
+                app.world().resource::<HelpOpen>().0,
+            )
+        };
+        click(&mut app, help);
+        assert_eq!(shows(&app), (false, true));
+        click(&mut app, help);
+        assert_eq!(shows(&app), (false, false), "back on the node");
+        click(&mut app, log);
+        click(&mut app, help);
+        assert_eq!(shows(&app), (true, true), "over the log");
+        click(&mut app, help);
+        assert_eq!(shows(&app), (true, false), "back on the log");
+        click(&mut app, help);
+        click(&mut app, log);
+        assert_eq!(shows(&app), (true, false), "the log, in its place");
+        // With the panel collapsed, the button opens it on the cheatsheet.
+        app.insert_resource(PanelCollapsed(true));
+        click(&mut app, help);
+        assert!(app.world().resource::<HelpOpen>().0);
+        assert!(!app.world().resource::<PanelCollapsed>().0);
+        // It is labelled as its neighbours are, with its key.
+        let mut texts = app.world_mut().query::<(&ChildOf, &Text)>();
+        let words: Vec<String> = texts
+            .iter(app.world())
+            .filter(|(parent, _)| parent.parent() == help)
+            .map(|(_, text)| text.0.clone())
+            .collect();
+        assert_eq!(words, ["Help (?)"]);
     }
 
     #[test]
@@ -2046,6 +2171,8 @@ mod tests {
             Some(UiState::Picker(Picker::Retrieval, String::new()))
         );
         assert_eq!(parse_ui_state("log"), Some(UiState::Log));
+        assert_eq!(parse_ui_state("help"), Some(UiState::Help));
+        assert_eq!(parse_ui_state("help:x"), None);
         assert_eq!(parse_ui_state("sources:x"), None, "only topics take text");
         assert_eq!(parse_ui_state("sideways"), None);
     }

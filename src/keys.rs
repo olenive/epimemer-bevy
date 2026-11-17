@@ -1,5 +1,6 @@
 //! The key map: every key and button the window answers to, in one place,
-//! and the help text made from it.
+//! and the rows made from it, which both the help text of `--help` and the
+//! side panel's cheatsheet (`cheatsheet.rs`) list, so the two cannot differ.
 //!
 //! The bar's view buttons (`bar.rs`) are made from [`VIEW_KEYS`] too, and
 //! ask the camera for the same [`ViewRequest`] the key does, so a key and
@@ -7,7 +8,8 @@
 //! or the side panel while a text field in the bar is taking the keyboard,
 //! except Escape, Enter and Shift+Enter, which the search field reads.
 
-use bevy::input::keyboard::KeyCode;
+use bevy::input::keyboard::{Key, KeyCode, KeyboardInput};
+use bevy::input::{ButtonInput, ButtonState};
 
 use crate::camera::ViewRequest;
 use crate::presets::Preset;
@@ -76,8 +78,47 @@ pub const LOG_KEY: (KeyCode, &str) = (KeyCode::KeyJ, "J");
 pub const BACK_KEY: (KeyCode, &str) = (KeyCode::KeyB, "B");
 
 /// The key that puts the keyboard into the bar's search field, and its name
-/// in the help: `/`, as in many programs that search.
+/// in the help: `/`, as in many programs that search. With Shift held it is
+/// [`HELP_KEY`] instead.
 pub const SEARCH_KEY: (KeyCode, &str) = (KeyCode::Slash, "/");
+
+/// The key that shows the cheatsheet in the side panel, or returns the
+/// panel to what it showed before, and its name in the help: `?`, as in
+/// many programs, which is Shift and the key of [`SEARCH_KEY`] where the
+/// keyboard is laid out as in the US, and any key whose character is `?`
+/// on any other layout ([`question_mark_typed`]).
+pub const HELP_KEY: (KeyCode, &str) = (KeyCode::Slash, "?");
+
+/// Whether either Shift key is held: `?` is Shift and `/`, and the wheel
+/// with Shift changes the camera's speed rather than zooming.
+pub fn shift_held(keys: &ButtonInput<KeyCode>) -> bool {
+    keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
+}
+
+/// Whether a key went down in this update, not by repeating, whose
+/// character on the keyboard's own layout is `?`. The keys are read as
+/// they come rather than as held, since a key that goes down as `?` with
+/// Shift may come up as `/` without it.
+pub fn question_mark_typed<'a>(inputs: impl IntoIterator<Item = &'a KeyboardInput>) -> bool {
+    inputs.into_iter().any(|input| {
+        input.state == ButtonState::Pressed
+            && !input.repeat
+            && matches!(&input.logical_key, Key::Character(c) if c.as_str() == "?")
+    })
+}
+
+/// Whether `/` was pressed this update without Shift, which opens search,
+/// and was not `?` on the keyboard's layout (`typed_question_mark`).
+pub fn search_pressed(keys: &ButtonInput<KeyCode>, typed_question_mark: bool) -> bool {
+    keys.just_pressed(SEARCH_KEY.0) && !shift_held(keys) && !typed_question_mark
+}
+
+/// Whether `?` was pressed this update, as Shift and `/` or as a key whose
+/// character is `?` (`typed_question_mark`), which shows or puts away the
+/// cheatsheet: once, where a key is both.
+pub fn help_pressed(keys: &ButtonInput<KeyCode>, typed_question_mark: bool) -> bool {
+    (keys.just_pressed(HELP_KEY.0) && shift_held(keys)) || typed_question_mark
+}
 
 /// The key that fits the current search hit's topic, as the bar's Go
 /// button does, and its name in the help: `G`, for go.
@@ -152,43 +193,79 @@ pub const VIEW_KEYS: [ViewKey; 8] = [
     },
 ];
 
-/// The controls, for `--help`.
-pub fn help() -> String {
-    let mut lines = vec![
-        "In the window:".to_owned(),
-        row("right drag", "look around"),
-        row(
+/// One row of the help: the mouse action or the keys, and what it does.
+pub type Row = (&'static str, &'static str);
+
+/// What the mouse does, in the order the help lists it.
+pub fn mouse_rows() -> Vec<Row> {
+    vec![
+        ("left click", LEFT_CLICK_WHAT),
+        ("left drag", LEFT_DRAG_WHAT),
+        ("right drag", "look around"),
+        ("wheel", WHEEL_WHAT),
+        ("Shift+wheel", SHIFT_WHEEL_WHAT),
+    ]
+}
+
+/// What every key does, in the order the help lists them.
+pub fn key_rows() -> Vec<Row> {
+    let mut rows = vec![
+        (
             "W A S D",
             "move along the view; in an orthographic view W and S zoom",
         ),
-        row("Q E", "move down and up"),
-        row(
-            "scroll",
-            "move slower or faster; over the bar or the side panel, scroll it",
-        ),
+        ("Q E", "move down and up"),
     ];
-    lines.extend(VIEW_KEYS.iter().map(|key| row(key.label, key.what)));
-    lines.push(row(
-        "left click",
-        "on a disc, or a node the side panel names: focus it; on the scene where no disc is: clear the focus",
-    ));
-    lines.push(row(CLEAR_FOCUS_KEY.1, CLEAR_FOCUS_WHAT));
-    lines.push(row(BAR_KEY.1, "show or hide the bar of filters and views"));
-    lines.push(row(EDGE_KEY.1, EDGE_KEY_WHAT));
-    lines.push(row(MODE_KEY.1, MODE_KEY_WHAT));
-    lines.push(row(PANEL_KEY.1, PANEL_KEY_WHAT));
-    lines.push(row(LOG_KEY.1, LOG_KEY_WHAT));
-    lines.push(row(BACK_KEY.1, BACK_KEY_WHAT));
-    lines.push(row(SEARCH_KEY.1, SEARCH_KEY_WHAT));
-    lines.push(row("Enter", WALK_WHAT));
-    lines.push(row("Shift+Enter", WALK_BACK_WHAT));
-    lines.push(row(GO_KEY.1, GO_KEY_WHAT));
-    lines.push(row(RECALCULATE_KEY.1, RECALCULATE_KEY_WHAT));
+    rows.extend(VIEW_KEYS.iter().map(|key| (key.label, key.what)));
+    rows.extend([
+        (CLEAR_FOCUS_KEY.1, CLEAR_FOCUS_WHAT),
+        (BAR_KEY.1, BAR_KEY_WHAT),
+        (EDGE_KEY.1, EDGE_KEY_WHAT),
+        (MODE_KEY.1, MODE_KEY_WHAT),
+        (PANEL_KEY.1, PANEL_KEY_WHAT),
+        (LOG_KEY.1, LOG_KEY_WHAT),
+        (HELP_KEY.1, HELP_KEY_WHAT),
+        (BACK_KEY.1, BACK_KEY_WHAT),
+        (SEARCH_KEY.1, SEARCH_KEY_WHAT),
+        ("Enter", WALK_WHAT),
+        ("Shift+Enter", WALK_BACK_WHAT),
+        (GO_KEY.1, GO_KEY_WHAT),
+        (RECALCULATE_KEY.1, RECALCULATE_KEY_WHAT),
+    ]);
+    rows
+}
+
+/// What the help says after the rows.
+pub const RETARGET_NOTE: &str = "A view key during a change of view retargets it.";
+
+/// The controls, for `--help` and the page's `?help`: the mouse, then the
+/// keys.
+pub fn help() -> String {
+    let mut lines = vec!["In the window:".to_owned()];
+    lines.extend(
+        mouse_rows()
+            .into_iter()
+            .chain(key_rows())
+            .map(|(keys, what)| row(keys, what)),
+    );
     lines.push(String::new());
-    lines.push("A view key during a change of view retargets it.".to_owned());
+    lines.push(RETARGET_NOTE.to_owned());
     lines.join("\n")
 }
 
+/// What a left click does, for the help.
+const LEFT_CLICK_WHAT: &str = "on a disc, or a node the side panel names: focus it; on the scene where no disc is: clear the focus";
+/// What a left drag does, for the help.
+const LEFT_DRAG_WHAT: &str =
+    "pan: the scene follows the pointer; a drag never focuses or clears the focus";
+/// What the wheel does, for the help.
+const WHEEL_WHAT: &str = "zoom towards the pointer; over the bar or the side panel, scroll it";
+/// What the wheel does with Shift held, for the help.
+const SHIFT_WHEEL_WHAT: &str = "make the keys move the camera slower or faster";
+/// What the bar's key does, for the help.
+const BAR_KEY_WHAT: &str = "show or hide the bar of filters and views";
+/// What the help key does, for the help.
+const HELP_KEY_WHAT: &str = "show a cheatsheet of the controls, the colours and the concepts in the side panel, or return the panel to what it showed";
 /// What Escape does, for the help.
 const CLEAR_FOCUS_WHAT: &str =
     "clear the focus, close the bar's open list, or leave the search field";
@@ -215,35 +292,124 @@ const EDGE_KEY_WHAT: &str = "show or hide every claim-to-claim edge between visi
 const MODE_KEY_WHAT: &str =
     "switch the time axis between recorded time and claim time, each claim over its timepoint";
 
-fn row(keys: &str, what: &str) -> String {
+/// One row as the help prints it: the keys in a column, then what they do.
+pub fn row(keys: &str, what: &str) -> String {
     format!("  {keys:<12} {what}")
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
     fn no_key_does_two_things() {
-        let mut codes: Vec<KeyCode> = MOVE_KEYS.iter().map(|&(code, _)| code).collect();
-        codes.extend(VIEW_KEYS.iter().map(|key| key.code));
-        codes.push(BAR_KEY.0);
-        codes.push(EDGE_KEY.0);
-        codes.push(MODE_KEY.0);
-        codes.push(CLEAR_FOCUS_KEY.0);
-        codes.extend([
-            PANEL_KEY.0,
-            LOG_KEY.0,
-            BACK_KEY.0,
-            SEARCH_KEY.0,
-            GO_KEY.0,
-            RECALCULATE_KEY.0,
-        ]);
-        codes.extend(WALK_KEYS);
+        // `?` is Shift and `/`, so a key is told apart with Shift held or not.
+        let plain = |code: KeyCode| (code, false);
+        let mut codes: Vec<(KeyCode, bool)> =
+            MOVE_KEYS.iter().map(|&(code, _)| plain(code)).collect();
+        codes.extend(VIEW_KEYS.iter().map(|key| plain(key.code)));
+        codes.extend(
+            [
+                BAR_KEY.0,
+                EDGE_KEY.0,
+                MODE_KEY.0,
+                CLEAR_FOCUS_KEY.0,
+                PANEL_KEY.0,
+                LOG_KEY.0,
+                BACK_KEY.0,
+                SEARCH_KEY.0,
+                GO_KEY.0,
+                RECALCULATE_KEY.0,
+            ]
+            .map(plain),
+        );
+        codes.push((HELP_KEY.0, true));
+        codes.extend(WALK_KEYS.map(plain));
         let count = codes.len();
         codes.sort_by_key(|code| format!("{code:?}"));
         codes.dedup();
         assert_eq!(codes.len(), count);
+    }
+
+    #[test]
+    fn question_mark_is_shift_and_slash_and_slash_alone_is_search() {
+        let held = |keys: &[KeyCode]| {
+            let mut input = ButtonInput::<KeyCode>::default();
+            for &key in keys {
+                input.press(key);
+            }
+            input
+        };
+        let slash = held(&[KeyCode::Slash]);
+        assert!(search_pressed(&slash, false) && !help_pressed(&slash, false));
+        for shift in [KeyCode::ShiftLeft, KeyCode::ShiftRight] {
+            let question = held(&[shift, KeyCode::Slash]);
+            assert!(help_pressed(&question, false) && !search_pressed(&question, false));
+            assert!(help_pressed(&question, true), "both at once is one ?");
+        }
+        assert!(!help_pressed(&held(&[KeyCode::ShiftLeft]), false));
+        // A layout with `?` elsewhere, and one with it on the `/` key.
+        let elsewhere = held(&[KeyCode::ShiftLeft, KeyCode::Minus]);
+        assert!(help_pressed(&elsewhere, true) && !search_pressed(&elsewhere, true));
+        assert!(help_pressed(&slash, true) && !search_pressed(&slash, true));
+    }
+
+    /// A key going down, `repeat` or not, with the character it has on the
+    /// keyboard's layout.
+    pub(crate) fn typed(key_code: KeyCode, character: &str, repeat: bool) -> KeyboardInput {
+        KeyboardInput {
+            key_code,
+            logical_key: Key::Character(character.into()),
+            state: ButtonState::Pressed,
+            text: Some(character.into()),
+            repeat,
+            window: bevy::ecs::entity::Entity::PLACEHOLDER,
+        }
+    }
+
+    #[test]
+    fn a_question_mark_is_any_key_that_types_one_once_as_it_goes_down() {
+        assert!(question_mark_typed(&[typed(KeyCode::Minus, "?", false)]));
+        assert!(question_mark_typed(&[
+            typed(KeyCode::ShiftLeft, "a", false),
+            typed(KeyCode::Slash, "?", false),
+        ]));
+        assert!(!question_mark_typed(&[typed(KeyCode::Slash, "/", false)]));
+        assert!(
+            !question_mark_typed(&[typed(KeyCode::Minus, "?", true)]),
+            "a repeat"
+        );
+        let up = KeyboardInput {
+            state: ButtonState::Released,
+            ..typed(KeyCode::Minus, "?", false)
+        };
+        assert!(!question_mark_typed(&[up]));
+        assert!(!question_mark_typed(&[]));
+    }
+
+    #[test]
+    fn the_help_lists_the_mouse_then_every_key_each_as_one_row() {
+        let help = help();
+        let listed: Vec<&str> = help.lines().filter(|l| l.starts_with("  ")).collect();
+        let rows: Vec<String> = mouse_rows()
+            .into_iter()
+            .chain(key_rows())
+            .map(|(keys, what)| row(keys, what))
+            .collect();
+        assert_eq!(listed, rows);
+        let names: Vec<&str> = mouse_rows().into_iter().map(|(name, _)| name).collect();
+        assert_eq!(
+            names,
+            [
+                "left click",
+                "left drag",
+                "right drag",
+                "wheel",
+                "Shift+wheel"
+            ]
+        );
+        assert!(help.ends_with(RETARGET_NOTE));
+        assert!(help.contains(&row("?", HELP_KEY_WHAT)));
     }
 
     #[test]

@@ -48,6 +48,13 @@
 //! entry names is a node reference whose click focuses that node and
 //! leaves the log open.
 //!
+//! Over either, the panel shows the cheatsheet while [`HelpOpen`] says so
+//! (`cheatsheet.rs`): `?` or the bar's Help button shows it, in a panel
+//! collapsed or not, and puts it away again, which leaves the panel on the
+//! log or the node it showed before. Its lines are the same every time, so
+//! they are drawn once, at the start, and its colour entries are written in
+//! the colours they explain.
+//!
 //! The panel is collapsible, by its Hide button or `P`, to a button that
 //! brings it back. It scrolls with the wheel, takes the pointer as the bar
 //! does, so that nothing beneath it is hovered or clicked (`ui_focus.rs`),
@@ -58,6 +65,7 @@ use std::collections::BTreeMap;
 
 use bevy::ecs::spawn::SpawnIter;
 use bevy::ecs::system::SystemParam;
+use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
 use bevy::text::LineBreak;
 use bevy::ui::{ScrollPosition, UiSystems};
@@ -66,14 +74,15 @@ use bevy::ui_widgets::ScrollArea;
 use crate::apply::LiveGraph;
 use crate::bar::style;
 use crate::camera::{BarCover, PanelCover};
+use crate::cheatsheet::{self, HelpOpen, PanelShows, press_help, press_log};
 use crate::clip::{beyond_line, clip_note, is_clipped};
 use crate::edge_index::{EdgeIndex, End};
-use crate::event_log::{LOG_KINDS, Log, LogContext, LogKind, LogOpen, log_lines, toggle_log};
+use crate::event_log::{LOG_KINDS, Log, LogContext, LogKind, LogOpen, log_lines};
 use crate::filter::{Filter, RefreshShown, Shown, is_visible};
 use crate::focus::{Focus, FocusHistory, GoBack, back_target};
 use crate::graph_index::GraphIndex;
 use crate::hub::{NodeType, NodeView, parse_timestamp};
-use crate::keys::{BACK_KEY, LOG_KEY, PANEL_KEY};
+use crate::keys::{BACK_KEY, LOG_KEY, PANEL_KEY, help_pressed, question_mark_typed};
 use crate::labels::label_text;
 use crate::layout::{Filing, Kind};
 use crate::pickers::{Pickers, short_id};
@@ -96,7 +105,7 @@ pub const MAX_EDGE_ROWS: usize = 200;
 pub const MAX_TRAY_ENTRIES: usize = 300;
 
 /// What the panel says with nothing focused.
-pub const HINT: &str = "Nothing is focused. Click a disc to see its node here in full: every field, its time in both modes, and its edges. A click on a node named here focuses it, and Back returns. / types into the search field in the bar.";
+pub const HINT: &str = "Nothing is focused. Click a disc to see its node here in full: every field, its time in both modes, and its edges. A click on a node named here focuses it, and Back returns. / types into the search field in the bar, and ? shows a cheatsheet of the controls and the colours.";
 
 /// One field of the focused node as the panel shows it: the NodeView
 /// field, its name in plain words, and its value.
@@ -139,6 +148,10 @@ pub enum Line {
     },
     /// A row of node references under the line before.
     Refs(Vec<NodeRef>),
+    /// Words written in the colour they explain, after a swatch of it.
+    Colour { colour: Color, text: String },
+    /// A term and what it means, in one paragraph.
+    Term { name: String, text: String },
 }
 
 /// A node named in a row of references: a click focuses it where there is
@@ -218,6 +231,28 @@ struct LogBlock;
 #[derive(Component)]
 struct LogKinds;
 
+/// The block of the cheatsheet's lines.
+#[derive(Component)]
+struct HelpBlock;
+
+/// What the panel shows: the focused node, the log, or the cheatsheet over
+/// either.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Showing {
+    Node,
+    Log,
+    Help,
+}
+
+/// What the panel shows, from whether the log and the cheatsheet are open.
+fn showing(log: LogOpen, help: HelpOpen) -> Showing {
+    match (help.0, log.0) {
+        (true, _) => Showing::Help,
+        (false, true) => Showing::Log,
+        (false, false) => Showing::Node,
+    }
+}
+
 /// A node reference in a row of them, which has a button's colour at rest.
 #[derive(Component)]
 struct Chip;
@@ -260,9 +295,11 @@ impl Plugin for PanelPlugin {
             .init_resource::<LogKind>()
             .init_resource::<LogOpen>()
             .init_resource::<LogLines>()
+            .init_resource::<HelpOpen>()
             .add_message::<GoBack>()
+            .add_message::<KeyboardInput>()
             .add_observer(on_click)
-            .add_systems(Startup, spawn_panel)
+            .add_systems(Startup, (spawn_panel, fill_help).chain())
             .add_systems(Update, (toggle_on_key, style_controls))
             .add_systems(
                 PostUpdate,
@@ -272,7 +309,7 @@ impl Plugin for PanelPlugin {
                     show_header,
                     show_node_lines,
                     show_tray_lines,
-                    show_log,
+                    show_view,
                     show_log_lines,
                     show_collapsed,
                     place_below_bar,
@@ -1143,6 +1180,49 @@ fn spawn_line(commands: &mut Commands, parent: Entity, line: &Line) {
                 commands.spawn((wrapped(reference.text.clone(), colour), ChildOf(chip)));
             }
         }
+        Line::Colour { colour, text } => {
+            commands.spawn((
+                row_node(),
+                ChildOf(parent),
+                children![
+                    (
+                        // Level with the middle of the text's first line.
+                        Node {
+                            margin: UiRect::top(px(4)),
+                            flex_shrink: 0.0,
+                            ..default()
+                        },
+                        children![style::swatch(*colour)],
+                    ),
+                    (
+                        Node {
+                            flex_grow: 1.0,
+                            flex_shrink: 1.0,
+                            flex_basis: px(0),
+                            min_width: px(0),
+                            ..default()
+                        },
+                        children![wrapped(text.clone(), *colour)],
+                    ),
+                ],
+            ));
+        }
+        Line::Term { name, text } => {
+            let row = commands
+                .spawn((
+                    Node {
+                        margin: UiRect::top(px(3)),
+                        ..row_node()
+                    },
+                    ChildOf(parent),
+                ))
+                .id();
+            let words = commands
+                .spawn((wrapped(String::new(), style::TEXT), ChildOf(row)))
+                .id();
+            commands.spawn((span(format!("{name}  "), style::ACCENT), ChildOf(words)));
+            commands.spawn((span(text.clone(), style::TEXT), ChildOf(words)));
+        }
     }
 }
 
@@ -1157,8 +1237,14 @@ fn header_button(words: String, control: PanelControl) -> impl Bundle {
     )
 }
 
-fn spawn_panel(mut commands: Commands, collapsed: Res<PanelCollapsed>, log: Res<LogOpen>) {
+fn spawn_panel(
+    mut commands: Commands,
+    collapsed: Res<PanelCollapsed>,
+    log: Res<LogOpen>,
+    help: Res<HelpOpen>,
+) {
     let display = |shown: bool| if shown { Display::Flex } else { Display::None };
+    let showing = showing(*log, *help);
     commands.spawn((
         PanelRoot,
         Node {
@@ -1225,7 +1311,7 @@ fn spawn_panel(mut commands: Commands, collapsed: Res<PanelCollapsed>, log: Res<
                     (
                         LogKinds,
                         Node {
-                            display: display(log.0),
+                            display: display(showing == Showing::Log),
                             flex_wrap: FlexWrap::Wrap,
                             column_gap: px(4),
                             row_gap: px(4),
@@ -1265,7 +1351,7 @@ fn spawn_panel(mut commands: Commands, collapsed: Res<PanelCollapsed>, log: Res<
                             (
                                 NodeSide,
                                 Node {
-                                    display: display(!log.0),
+                                    display: display(showing == Showing::Node),
                                     flex_direction: FlexDirection::Column,
                                     flex_shrink: 0.0,
                                     ..default()
@@ -1295,7 +1381,17 @@ fn spawn_panel(mut commands: Commands, collapsed: Res<PanelCollapsed>, log: Res<
                             (
                                 LogBlock,
                                 Node {
-                                    display: display(log.0),
+                                    display: display(showing == Showing::Log),
+                                    flex_direction: FlexDirection::Column,
+                                    row_gap: px(1),
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                },
+                            ),
+                            (
+                                HelpBlock,
+                                Node {
+                                    display: display(showing == Showing::Help),
                                     flex_direction: FlexDirection::Column,
                                     row_gap: px(1),
                                     flex_shrink: 0.0,
@@ -1321,22 +1417,34 @@ fn spawn_panel(mut commands: Commands, collapsed: Res<PanelCollapsed>, log: Res<
     ));
 }
 
-/// Shows the title, the log's while it is open, and Back as waiting while
-/// there is nowhere to go back to.
+/// Draws the cheatsheet's lines, once: they are the same every time.
+fn fill_help(mut commands: Commands, block: Single<Entity, With<HelpBlock>>) {
+    for line in cheatsheet::lines() {
+        spawn_line(&mut commands, *block, &line);
+    }
+}
+
+/// Shows the title, the log's or the cheatsheet's while it is shown, and
+/// Back as waiting while there is nowhere to go back to.
 fn show_header(
     header: Res<PanelHeader>,
     open: Res<LogOpen>,
+    help: Res<HelpOpen>,
     log: Res<LogLines>,
     mut titles: Query<&mut Text, With<PanelTitle>>,
     mut back: Query<&mut TextColor, With<BackWords>>,
 ) {
-    if !header.is_changed() && !open.is_changed() && !log.is_changed() {
+    if !header.is_changed() && !open.is_changed() && !help.is_changed() && !log.is_changed() {
         return;
     }
-    let title = if open.0 { &log.title } else { &header.title };
+    let title = match showing(*open, *help) {
+        Showing::Node => header.title.as_str(),
+        Showing::Log => log.title.as_str(),
+        Showing::Help => cheatsheet::TITLE,
+    };
     for mut text in &mut titles {
-        if text.0 != *title {
-            text.0.clone_from(title);
+        if text.0 != title {
+            title.clone_into(&mut text.0);
         }
     }
     let colour = if header.back {
@@ -1350,15 +1458,17 @@ fn show_header(
 }
 
 /// Draws the focused node's lines again when they change, and starts the
-/// panel at its top when the focus does.
+/// panel at its top when the focus does, unless the cheatsheet is shown,
+/// which a click on a disc to try what it says should not scroll away.
 fn show_node_lines(
     mut commands: Commands,
     lines: Res<NodeLines>,
     focus: Res<Focus>,
+    help: Res<HelpOpen>,
     block: Single<(Entity, Option<&Children>), With<NodeBlock>>,
     mut body: Query<&mut ScrollPosition, With<PanelBody>>,
 ) {
-    if focus.is_changed() {
+    if focus.is_changed() && !help.0 {
         for mut scroll in &mut body {
             if scroll.0 != Vec2::ZERO {
                 scroll.0 = Vec2::ZERO;
@@ -1444,19 +1554,25 @@ fn refresh_log(sources: LogSources, mut lines: ResMut<LogLines>) {
     lines.set_if_neq(LogLines { title, lines: log });
 }
 
-/// What `show_log` shows or hides: the node's side, and the log's block
-/// and kind buttons.
-type LogParts = Or<(With<NodeSide>, With<LogBlock>, With<LogKinds>)>;
+/// What `show_view` shows or hides: the node's side, the log's block and
+/// kind buttons, and the cheatsheet's block.
+type ViewParts = Or<(
+    With<NodeSide>,
+    With<LogBlock>,
+    With<LogKinds>,
+    With<HelpBlock>,
+)>;
 
-/// Shows the log and its kind buttons or the node, and starts the panel at
-/// its top when that changes or the kind does.
-fn show_log(
+/// Shows the node, the log and its kind buttons, or the cheatsheet, and
+/// starts the panel at its top when that changes or the log's kind does.
+fn show_view(
     open: Res<LogOpen>,
+    help: Res<HelpOpen>,
     kind: Res<LogKind>,
-    mut parts: Query<(&mut Node, Has<NodeSide>), LogParts>,
+    mut parts: Query<(&mut Node, Has<NodeSide>, Has<HelpBlock>), ViewParts>,
     mut body: Query<&mut ScrollPosition, With<PanelBody>>,
 ) {
-    if !open.is_changed() && !kind.is_changed() {
+    if !open.is_changed() && !help.is_changed() && !kind.is_changed() {
         return;
     }
     for mut scroll in &mut body {
@@ -1464,9 +1580,18 @@ fn show_log(
             scroll.0 = Vec2::ZERO;
         }
     }
-    for (mut node, node_side) in &mut parts {
-        let shown = if node_side { !open.0 } else { open.0 };
-        let display = if shown { Display::Flex } else { Display::None };
+    let showing = showing(*open, *help);
+    for (mut node, node_side, help_block) in &mut parts {
+        let part = match (node_side, help_block) {
+            (true, _) => Showing::Node,
+            (_, true) => Showing::Help,
+            _ => Showing::Log,
+        };
+        let display = if part == showing {
+            Display::Flex
+        } else {
+            Display::None
+        };
         if node.display != display {
             node.display = display;
         }
@@ -1550,25 +1675,32 @@ fn measure_cover(
     }
 }
 
-/// `P` shows or hides the panel, and `J` shows the log in it or returns it
-/// to the node, unless a text field has the keyboard.
+/// `P` shows or hides the panel, `J` shows the log in it or returns it to
+/// the node, and `?` shows the cheatsheet or returns the panel to what it
+/// showed, unless a text field has the keyboard, which `?` is typed into.
 fn toggle_on_key(
     keys: Res<ButtonInput<KeyCode>>,
+    mut typed: MessageReader<KeyboardInput>,
     ui: Res<UiFocus>,
-    mut collapsed: ResMut<PanelCollapsed>,
-    mut open: ResMut<LogOpen>,
+    mut shows: PanelShows,
 ) {
+    // Read whatever happens, so that a `?` typed into a field is not taken
+    // for one from the scene once the field lets the keyboard go.
+    let question_mark = question_mark_typed(typed.read());
     if ui.typing {
         return;
     }
+    let mut choice = shows.choice();
     if keys.just_pressed(PANEL_KEY.0) {
-        collapsed.0 = !collapsed.0;
+        choice.collapsed = !choice.collapsed;
     }
     if keys.just_pressed(LOG_KEY.0) {
-        let (log, folded) = toggle_log(open.0, collapsed.0);
-        open.set_if_neq(LogOpen(log));
-        collapsed.set_if_neq(PanelCollapsed(folded));
+        choice = press_log(choice);
     }
+    if help_pressed(&keys, question_mark) {
+        choice = press_help(choice);
+    }
+    shows.set(choice);
 }
 
 /// Colours the panel's buttons and rows by whether they are under the
@@ -2245,6 +2377,123 @@ mod tests {
         assert!(!app.world().resource::<LogOpen>().0);
         assert_eq!(title(&mut app), "Focused fact");
         assert!(shown::<NodeSide>(&mut app) && !shown::<LogBlock>(&mut app));
+    }
+
+    /// `?`: Shift held, and `/`.
+    fn question_mark(app: &mut App) {
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.press(KeyCode::ShiftRight);
+        keys.press(KeyCode::Slash);
+        app.update();
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.release(KeyCode::ShiftRight);
+        keys.release(KeyCode::Slash);
+        keys.clear();
+    }
+
+    fn help_open(app: &App) -> bool {
+        app.world().resource::<HelpOpen>().0
+    }
+
+    #[test]
+    fn question_mark_shows_the_cheatsheet_in_place_of_the_node_and_again_returns_to_it() {
+        let mut app = app();
+        let fact =
+            app.world().resource::<GraphIndex>().by_id["fac70000-0000-4000-8000-000000000001"];
+        app.insert_resource(Focus(Some(fact)));
+        app.update();
+        assert!(!shown::<HelpBlock>(&mut app));
+
+        question_mark(&mut app);
+        assert!(help_open(&app));
+        assert_eq!(title(&mut app), cheatsheet::TITLE);
+        assert!(shown::<HelpBlock>(&mut app));
+        assert!(!shown::<NodeSide>(&mut app) && !shown::<LogBlock>(&mut app));
+        let mut blocks = app
+            .world_mut()
+            .query_filtered::<&Children, With<HelpBlock>>();
+        let drawn = blocks.single(app.world()).unwrap().len();
+        assert_eq!(drawn, cheatsheet::lines().len(), "every line drawn");
+
+        question_mark(&mut app);
+        assert!(!help_open(&app));
+        assert_eq!(title(&mut app), "Focused fact", "back on the node");
+        assert!(shown::<NodeSide>(&mut app) && !shown::<HelpBlock>(&mut app));
+
+        // Over the log, ? returns to the log; J from it shows the log.
+        press(&mut app, LOG_KEY.0);
+        question_mark(&mut app);
+        assert!(shown::<HelpBlock>(&mut app));
+        assert!(!shown::<LogBlock>(&mut app) && !shown::<LogKinds>(&mut app));
+        question_mark(&mut app);
+        assert!(shown::<LogBlock>(&mut app) && shown::<LogKinds>(&mut app));
+        assert!(title(&mut app).starts_with("Log"));
+        question_mark(&mut app);
+        press(&mut app, LOG_KEY.0);
+        assert!(!help_open(&app) && app.world().resource::<LogOpen>().0);
+        assert!(shown::<LogBlock>(&mut app));
+
+        // Hidden, the panel opens on the cheatsheet.
+        press(&mut app, PANEL_KEY.0);
+        question_mark(&mut app);
+        assert!(!app.world().resource::<PanelCollapsed>().0 && help_open(&app));
+
+        // `/` alone is search's, and `?` is typed while a field has the keys.
+        press(&mut app, KeyCode::Slash);
+        assert!(help_open(&app), "/ does not toggle the cheatsheet");
+        app.world_mut().resource_mut::<UiFocus>().typing = true;
+        question_mark(&mut app);
+        assert!(help_open(&app), "typed into the field");
+    }
+
+    /// A key going down whose character is `?`, on `key`, with Shift and
+    /// `/` held as well where `us_layout`.
+    fn typed_question_mark(app: &mut App, key: KeyCode, us_layout: bool) {
+        app.world_mut()
+            .write_message(crate::keys::tests::typed(key, "?", false));
+        if us_layout {
+            question_mark(app);
+        } else {
+            app.update();
+        }
+    }
+
+    #[test]
+    fn a_key_that_types_a_question_mark_on_another_layout_shows_the_cheatsheet_once() {
+        let mut app = app();
+        typed_question_mark(&mut app, KeyCode::Minus, false);
+        assert!(help_open(&app), "a layout with ? on another key");
+        typed_question_mark(&mut app, KeyCode::Minus, false);
+        assert!(!help_open(&app));
+        // On a US layout the key is both Shift and `/` and the character `?`:
+        // one press, so one toggle.
+        typed_question_mark(&mut app, KeyCode::Slash, true);
+        assert!(help_open(&app));
+        typed_question_mark(&mut app, KeyCode::Slash, true);
+        assert!(!help_open(&app));
+
+        // Typed into a field, it is not read again once the field lets go.
+        app.world_mut().resource_mut::<UiFocus>().typing = true;
+        typed_question_mark(&mut app, KeyCode::Minus, false);
+        app.world_mut().resource_mut::<UiFocus>().typing = false;
+        app.update();
+        assert!(!help_open(&app));
+    }
+
+    #[test]
+    fn the_panel_starts_on_the_cheatsheet_when_asked() {
+        let (index, model) = fixture_index();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .insert_resource(index)
+            .insert_resource(model)
+            .insert_resource(HelpOpen(true))
+            .add_plugins(PanelPlugin);
+        app.world_mut().register_component::<Window>();
+        app.update();
+        assert!(shown::<HelpBlock>(&mut app) && !shown::<NodeSide>(&mut app));
+        assert_eq!(title(&mut app), cheatsheet::TITLE);
     }
 
     #[test]

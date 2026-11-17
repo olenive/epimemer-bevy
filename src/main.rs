@@ -13,7 +13,8 @@
 //! as the column, smear or disc of DESIGN.md §4, with the drawn axis, its
 //! ticks and "now", the tray of what claim time cannot place, and validity
 //! brackets on focus; the camera presets of DESIGN.md §6, a free camera
-//! between them, the filters of DESIGN.md §10, set from the command line and
+//! between them that the mouse pans and zooms as a map's does, the filters
+//! of DESIGN.md §10, set from the command line and
 //! from the bar along the top, where another session's or graph's snapshot
 //! can be loaded too, focus and hover on every node, the label budget of
 //! DESIGN.md §9, and the edges of DESIGN.md §5: claim-to-claim lines on
@@ -24,7 +25,9 @@
 //! records, one of which the bar can choose to see what a tool call handed
 //! the agent (`retrieval.rs`), and its acts, advisories and pipeline runs,
 //! which the side panel shows as a log (`event_log.rs`), with the graph's
-//! reflect counter in the bar (`reflect_counter.rs`). It builds for the browser as well
+//! reflect counter in the bar (`reflect_counter.rs`), and a cheatsheet of
+//! the controls, the colours and the concepts drawn, which the side panel
+//! shows on `?` (`cheatsheet.rs`). It builds for the browser as well
 //! as natively, from the same code: the reads and the stream run in the
 //! background over a transport each platform implements (`background.rs`,
 //! `hub.rs`, `stream.rs`), and in a browser the options come from the page's
@@ -39,6 +42,7 @@ mod brackets;
 #[cfg(any(test, target_arch = "wasm32"))]
 mod browser;
 mod camera;
+mod cheatsheet;
 mod clip;
 #[cfg(not(target_arch = "wasm32"))]
 mod dev;
@@ -169,7 +173,9 @@ Filters, which dim the nodes that fail them:
                       or with a picker's list open: sessions, graphs,
                       metacontexts, topics, topics:PREFIX with PREFIX
                       typed, sources, or retrievals; or log, open with the
-                      log in the side panel
+                      log in the side panel; or help, open with the
+                      cheatsheet of the controls, the colours and the
+                      concepts in the side panel
   --screenshot PATH   save a PNG of the view and the bar once the scene is
                       drawn, then exit
   --screenshot-after SECONDS
@@ -1173,6 +1179,7 @@ mod tests {
             UiState::Picker(bar::Picker::Topic, "vis".into())
         );
         assert_eq!(run("--ui-state=collapsed").ui_state, UiState::Collapsed);
+        assert_eq!(run("--ui-state help").ui_state, UiState::Help);
         assert_eq!(args.preset, Preset::Timeline);
         assert_eq!(run("--preset=now").preset, Preset::Now);
         assert_eq!(args.request.hub, "127.0.0.1:9000");

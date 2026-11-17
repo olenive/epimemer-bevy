@@ -7,7 +7,7 @@ pinned to a week and a claim whose period is only vaguely known look
 different at a glance. The graph view, the timeline view and the free 3D view
 are three camera presets of that one scene.
 
-*Status: slices 1 to 10 and 12 to 14 of `DESIGN.md` §14, 2026-11-07. It draws
+*Status: slices 1 to 10, 12 to 14 and 16 of `DESIGN.md` §14, 2026-11-17. It draws
 every node of one graph on a time axis, topics on a map made from their
 embeddings, so that related topics stand together, and their claims
 around them: in recorded time as a disc at the moment it was recorded, and
@@ -15,12 +15,14 @@ in claim time as the column, smear or disc of `DESIGN.md` §4, with a drawn
 axis, its ticks and "now", what lies beyond the claim axis drawn clipped at
 its ends, a tray of what claim time cannot place, and the
 focused claim's validity brackets. The camera presets of `DESIGN.md` §6, a
-free camera between them, and the filters of `DESIGN.md` §10, which dim or
+free camera between them that the mouse pans and zooms as it would a map,
+and the filters of `DESIGN.md` §10, which dim or
 hide nodes and are set from the bar along the top of the window or from the
 command line, work in both modes. The bar also switches to another
 session's or graph's snapshot, filters to the nodes one retrieval
-returned with its Retrieval picker, and opens the log of the session's
-acts, advisories and pipeline runs in place of the side panel's node.
+returned with its Retrieval picker, opens the log of the session's
+acts, advisories and pipeline runs in place of the side panel's node, and
+opens a cheatsheet of the controls, the colours and the concepts there too.
 Every node can be hovered and focused, and
 the labels of `DESIGN.md` §9 name a budget of topics and claims that
 gathers around the focus. The edges of `DESIGN.md` §5 are drawn: a hovered
@@ -87,6 +89,7 @@ In the window:
 | `C` | Switch the time axis between recorded time and claim time |
 | `P` | Show or hide the side panel |
 | `J` | Show the log of acts, advisories and pipeline runs in the side panel, or return the panel to the focused node |
+| `?` | Show the cheatsheet of the controls, the colours and the concepts in the side panel, or return the panel to what it showed |
 | `B` | Focus the node focused before this one, back along the focus history |
 | `/` | Type into the search field, which then takes the keyboard |
 | `Enter`, in the search field | Focus the next hit |
@@ -97,16 +100,18 @@ In the window:
 | Left click on a node the side panel names | Focus that node |
 | Left click on the scene where no disc is | Clear the focus |
 | `Escape` | Leave the search field, close the bar's open list, or clear the focus |
+| Left drag | Pan: the scene moves with the pointer. A press that moves more than a few pixels is a drag and never a click |
 | Right drag | Look around |
 | `W` `A` `S` `D` | Move along the view; in an orthographic view `W` and `S` zoom |
 | `Q` `E` | Move down and up |
-| Scroll wheel | Move slower or faster; over the bar or the side panel, scroll it |
+| Scroll wheel | Zoom towards the pointer; over the bar or the side panel, scroll it |
+| `Shift` and the scroll wheel | Make `W` `A` `S` `D` `Q` `E` move the camera slower or faster |
 
 A change of view takes half a second, and a key during one retargets it.
 Every view is fitted to the part of the window below the bar and, while
 the side panel is open, left of it.
 `cargo run -- --help` prints the same list, from the key map in
-`src/keys.rs`.
+`src/keys.rs`, and the cheatsheet shows it in the window.
 
 ### The topic map
 
@@ -289,6 +294,7 @@ Along the top of the window, left to right:
 | Stream | How the event stream stands: connected, with the messages received and the events applied; reconnecting, with the last error; or reading the graph again. |
 | reflect | The graph drawn's reflect counter, `reflect N/M`: stores since its last reflect against the count at which reflect is suggested, with "suggested" once it is. A graph the session is not on shows `reflect -`, since the hub reports the active graph's only. |
 | Log | Shows the log in the side panel in place of the focused node, and again returns to the node; `J` does the same. The log lists the session's acts and advisories of the graph drawn and its pipeline runs, newest first, filtered by kind, and a click on a node an entry names focuses it. |
+| Help | Shows the cheatsheet in the side panel, in place of the node or the log, and again returns the panel to what it showed; `?` does the same. The cheatsheet lists the mouse and the keys, shows what each colour means in that colour, and says in a sentence or two what a topic node, a fact, an inference and the other things drawn are. |
 | Time | Recorded time or claim time; `C` does the same. |
 | Metacontexts | A checkbox for each of the graph's metacontexts, and All. |
 | Kinds | Topics, facts and inferences, each on or off. |
@@ -321,7 +327,8 @@ never reaches the scene beneath it, and neither hovers nor focuses a disc.
 ### The side panel
 
 On the right of the window, below the bar. With nothing focused it says
-how to focus a node; with a node focused it shows, top to bottom:
+how to focus a node and that `?` shows the cheatsheet; with a node focused
+it shows, top to bottom:
 
 - Every field the hub sends for the node, in plain words: its kind, the
   whole content and description, wrapped rather than cut as the label is,
@@ -420,7 +427,8 @@ reason, since it is more likely mistyped than meant.
 `--ui-state` sets how the bar starts: `open`, the default, `collapsed`, or
 with a picker's list open, `sessions`, `graphs`, `metacontexts`, `sources`,
 `retrievals`, `topics`, or `topics:PREFIX` with `PREFIX` typed into the
-topic field; `log` starts with the log in the side panel.
+topic field; `log` starts with the log in the side panel, and `help` with
+the cheatsheet.
 
 A few options exist so a change can be checked with nobody at the window:
 `--screenshot PATH` saves a PNG of the view `--preset` names, with the bar

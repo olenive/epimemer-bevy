@@ -5,7 +5,7 @@ Epimemer repository and moved here the day this repository was created;
 this file is the design's only home. Slices 1 to 10 of §14 are built
 (2026-10-21), slice 11 waits on its Petritype prerequisites, and slices 12
 to 15 were added on 2026-11-07, when the owner decided this client replaces
-the dashboard (§1); slices 12 and 13 were built the same day. Slice 16 was added on 2026-11-17, when the owner asked for a cheatsheet in the client and a mouse that pans and zooms. The numbers in §3 were measured on the development graph
+the dashboard (§1); slices 12 and 13 were built the same day. Slice 16 was added and built on 2026-11-17, when the owner asked for a cheatsheet in the client and a mouse that pans and zooms. The numbers in §3 were measured on the development graph
 on 2026-10-18, through the hub described in `VIZ_CONTRACT.md`, which is the
 only surface this client depends on. `VIZ_CONTRACT.md` throughout means
 `dev-docs/VIZ_CONTRACT.md` in the Epimemer repository.

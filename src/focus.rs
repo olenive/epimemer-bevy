@@ -4,7 +4,10 @@
 //! A left click on a disc focuses its node. A left click on the scene where
 //! no disc is clears the focus, and so does Escape, unless a list of the
 //! bar is open, which Escape closes first, or a text field has the
-//! keyboard. The disc under the pointer, the nearest where several are, is
+//! keyboard. A press that moved more than a few pixels before its release
+//! is a drag, which pans (`camera.rs`), and is never a click: it neither
+//! focuses the disc it began on nor clears the focus, whatever picking
+//! makes of it. The disc under the pointer, the nearest where several are, is
 //! hovered. Both are node indices in layout order, kept as the resources
 //! [`Focus`] and [`Hovered`]: the scene brightens the two discs and fades
 //! the rest with their distance from the focus (`scene.rs`), the edges of
@@ -35,6 +38,7 @@ use bevy::picking::pointer::PointerId;
 use bevy::prelude::*;
 
 use crate::bar::OpenPicker;
+use crate::camera::LeftPress;
 use crate::edge_index::{EdgeIndex, claim_neighbours};
 use crate::graph_index::GraphIndex;
 use crate::keys::{BACK_KEY, CLEAR_FOCUS_KEY};
@@ -185,6 +189,7 @@ impl Plugin for FocusPlugin {
         app.init_resource::<Focus>()
             .init_resource::<Hovered>()
             .init_resource::<UiFocus>()
+            .init_resource::<LeftPress>()
             .init_resource::<FocusHistory>()
             .add_message::<GoBack>()
             .add_observer(focus_on_click)
@@ -249,17 +254,26 @@ pub fn nearest_disc(hits: impl IntoIterator<Item = (f32, usize)>) -> Option<usiz
 
 /// A left click on a disc focuses its node, and a left click that reached
 /// the window, with no disc and no part of the bar under the pointer,
-/// clears the focus. The observer sees each click once at every entity it
-/// climbs through, and acts only at the entity first clicked.
+/// clears the focus. Picking sends a click for a press and release on the
+/// same entity however far the pointer moved between, so a mouse press the
+/// camera has counted as a drag ([`LeftPress`], kept before picking sends
+/// the click) does neither. The observer sees each click once at every
+/// entity it climbs through, and acts only at the entity first clicked.
 fn focus_on_click(
     click: On<Pointer<Click>>,
     discs: Query<&Disc>,
     windows: Query<(), With<Window>>,
     ui: Res<UiFocus>,
+    press: Res<LeftPress>,
     mut focus: ResMut<Focus>,
 ) {
     let target = click.original_event_target();
-    if click.button != PointerButton::Primary || click.entity != target || ui.pointer_over_ui {
+    let dragged = click.pointer_id == PointerId::Mouse && press.dragged;
+    if click.button != PointerButton::Primary
+        || click.entity != target
+        || ui.pointer_over_ui
+        || dragged
+    {
         return;
     }
     if let Ok(disc) = discs.get(target) {
