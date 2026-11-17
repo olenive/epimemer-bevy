@@ -16,9 +16,15 @@ serde_json = "1.0.154"
 # `Instant` and `SystemTime` that work in a browser as well, where std's
 # panic; on a native target they are std's own.
 web-time = "1.1.0"
-# No Petritype crate yet: the knowledge graph is not a Petri net.
-# petritype-activity and petritype-layout arrive with the pipeline strip
-# (DESIGN.md §10), and petritype-bevy is not needed.
+# The pipeline strip alone (DESIGN.md §10), since the knowledge graph is not
+# a Petri net: petritype-activity's model and thumbnail of a net's activity,
+# petritype-layout's ranks for the thumbnail's grid, and the petritype core
+# for the ids and edges both take. From the petritype-rs repository at a
+# pinned commit, as checked on 2026-11-17, until the crates are published;
+# petritype-bevy is not needed.
+petritype = { git = "https://github.com/olenive/petritype-rs", rev = "d6b0a8f9cfdac87117d333dfbe7da65b967cf5ba" }
+petritype-activity = { git = "https://github.com/olenive/petritype-rs", rev = "d6b0a8f9cfdac87117d333dfbe7da65b967cf5ba" }
+petritype-layout = { git = "https://github.com/olenive/petritype-rs", rev = "d6b0a8f9cfdac87117d333dfbe7da65b967cf5ba" }
 
 # The native transports, blocking, each on a thread of its own.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

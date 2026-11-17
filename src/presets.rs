@@ -21,7 +21,9 @@
 //! Every fit frames the visible nodes only, so a node the filter hides
 //! leaves the framing with its disc, and holds both ends of every column. A fit is for a [`Screen`]: the
 //! viewport's shape and the band at its top that the bar covers, which the
-//! fit leaves clear, so that what it frames is never under the bar. When none of the nodes a fit is for is
+//! fit leaves clear, so that what it frames is never under the bar, and
+//! likewise the side panel's strip at its right and the pipeline strip's
+//! band at its bottom. When none of the nodes a fit is for is
 //! visible, it frames them all rather than collapse onto the origin.
 //!
 //! A change of view is a tween ([`between`]): the projection switches at the
@@ -131,14 +133,16 @@ pub struct Region {
 }
 
 /// The viewport a view is fitted to: its aspect ratio, width over height,
-/// the fraction of its height, from the top, that the bar covers, and the
-/// fraction of its width, from the right, that the side panel covers. A
-/// bare aspect ratio is a screen with nothing over it.
+/// the fraction of its height, from the top, that the bar covers, the
+/// fraction of its width, from the right, that the side panel covers, and
+/// the fraction of its height, from the bottom, that the pipeline strip
+/// covers. A bare aspect ratio is a screen with nothing over it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Screen {
     pub aspect: f32,
     pub inset: f32,
     pub right: f32,
+    pub bottom: f32,
 }
 
 impl From<f32> for Screen {
@@ -147,15 +151,19 @@ impl From<f32> for Screen {
             aspect,
             inset: 0.0,
             right: 0.0,
+            bottom: 0.0,
         }
     }
 }
 
 /// The most of the viewport a fit leaves clear at the top, so that a bar
-/// taller than half a small window still leaves half for the scene, and the
-/// most it leaves clear at the right, for the side panel.
+/// taller than half a small window still leaves half for the scene, the
+/// most it leaves clear at the right, for the side panel, and the most at
+/// the bottom, for the pipeline strip, so that a quarter of the height is
+/// always left for the scene.
 pub const MAX_INSET: f32 = 0.5;
 pub const MAX_RIGHT: f32 = 0.5;
+pub const MAX_BOTTOM: f32 = 0.25;
 
 /// A covered fraction of the screen, kept between none and `most`.
 fn covered(fraction: f32, most: f32) -> f32 {
@@ -210,15 +218,17 @@ pub fn bounds(points: &[Vec3]) -> Option<(Vec3, Vec3)> {
 ///
 /// With a covered band, the points are framed in the part of the screen
 /// below it: the view spans more, and its focus rises by half the band, so
-/// that the box's centre sits in the middle of the part left clear. A
-/// covered strip at the right, the side panel's, is left clear the same
-/// way across: the view spans more, and its focus moves right by half the
-/// strip.
+/// that the box's centre sits in the middle of the part left clear. A band
+/// covered at the bottom, the pipeline strip's, is left clear the same way,
+/// its focus falling by half the band. A covered strip at the right, the
+/// side panel's, is left clear the same way across: the view spans more,
+/// and its focus moves right by half the strip.
 pub fn fit(points: &[Vec3], yaw: f32, pitch: f32, lens: Lens, screen: impl Into<Screen>) -> View {
     let Screen {
         aspect,
         inset,
         right,
+        bottom,
     } = screen.into();
     let rotation = rotation(yaw, pitch);
     let inverse = rotation.inverse();
@@ -228,7 +238,11 @@ pub fn fit(points: &[Vec3], yaw: f32, pitch: f32, lens: Lens, screen: impl Into<
     let aspect = if aspect > 0.0 { aspect } else { 1.0 };
     let inset = covered(inset, MAX_INSET);
     let right = covered(right, MAX_RIGHT);
-    let clear = 1.0 - inset;
+    let bottom = covered(bottom, MAX_BOTTOM);
+    let clear = 1.0 - inset - bottom;
+    // How far below the screen's middle the clear part's middle is, as a
+    // fraction of the screen's half-height.
+    let below = inset - bottom;
     let clear_across = 1.0 - right;
     let tan = (FOV / 2.0).tan();
     let height = match lens {
@@ -252,7 +266,7 @@ pub fn fit(points: &[Vec3], yaw: f32, pitch: f32, lens: Lens, screen: impl Into<
             // across with r = shift_across * d.
             let tan_up = tan * clear / FIT_MARGIN;
             let tan_across = tan * aspect * clear_across / FIT_MARGIN;
-            let shift = tan * inset;
+            let shift = tan * below;
             let shift_across = tan * aspect * right;
             let d = local
                 .iter()
@@ -268,10 +282,10 @@ pub fn fit(points: &[Vec3], yaw: f32, pitch: f32, lens: Lens, screen: impl Into<
         }
     }
     .max(MIN_HEIGHT);
-    // Half the band, in both projections: for a perspective view the lift
-    // s = shift * d is tan * inset * height / (2 * tan). Across, half the
+    // Half the bands, in both projections: for a perspective view the lift
+    // s = shift * d is tan * below * height / (2 * tan). Across, half the
     // strip of a view `height * aspect` wide.
-    let lift = height * inset / 2.0;
+    let lift = height * below / 2.0;
     let aside = height * aspect * right / 2.0;
     View {
         focus: rotation * (centre + Vec3::Y * lift + Vec3::X * aside),
@@ -730,6 +744,7 @@ mod tests {
             aspect: ASPECT,
             inset,
             right: 0.0,
+            bottom: 0.0,
         };
         let mut views: Vec<View> = [Preset::Graph, Preset::Timeline, Preset::Free]
             .into_iter()
@@ -777,10 +792,75 @@ mod tests {
                     aspect: ASPECT,
                     inset: 0.0,
                     right: 0.0,
+                    bottom: 0.0,
                 }
             ),
             fit(&points, 0.3, -0.4, Lens::Perspective, ASPECT),
             "no band, no change"
+        );
+    }
+
+    #[test]
+    fn a_fit_above_the_strip_holds_its_points_between_it_and_the_bar() {
+        let points = points();
+        let (inset, bottom) = (0.1, 0.15);
+        let screen = Screen {
+            aspect: ASPECT,
+            inset,
+            right: 0.0,
+            bottom,
+        };
+        let mut views: Vec<View> = [Preset::Graph, Preset::Timeline, Preset::Free]
+            .into_iter()
+            .map(|preset| preset_view(preset, &points, &[], &[], NowLayer::Latest(1.0), screen))
+            .collect();
+        for lens in [Lens::Perspective, Lens::Orthographic] {
+            for &(yaw, pitch) in &[(0.0, 0.0), (2.5, -0.1), (-1.0, 1.2), (0.7, -FRAC_PI_2)] {
+                views.push(fit(&points, yaw, pitch, lens, screen));
+            }
+        }
+        // The strip covers the screen's bottom from -1 to -1 + 2 * bottom,
+        // and the bar its top from 1 - 2 * inset.
+        let (floor, top) = (-1.0 + 2.0 * bottom - 1e-4, 1.0 - 2.0 * inset + 1e-4);
+        for view in &views {
+            let (lowest, highest) = points
+                .iter()
+                .map(|&p| {
+                    assert!(inside(view, p), "{view:?}: {p} outside");
+                    project(view, p).1
+                })
+                .fold((f32::MAX, f32::MIN), |(lo, hi), y| (lo.min(y), hi.max(y)));
+            assert!(
+                lowest >= floor,
+                "{view:?}: a point at {lowest}, under the strip"
+            );
+            assert!(
+                highest <= top,
+                "{view:?}: a point at {highest}, under the bar"
+            );
+        }
+        // The graph preset's height is the clear part's.
+        let plain = preset_view(
+            Preset::Graph,
+            &points,
+            &[],
+            &[],
+            NowLayer::Latest(1.0),
+            ASPECT,
+        );
+        assert!((views[0].height * (1.0 - inset - bottom) - plain.height).abs() < 1e-2);
+        // A strip taller than the most a fit leaves it is held to that.
+        let tall = Screen {
+            bottom: 0.9,
+            ..screen
+        };
+        let held = Screen {
+            bottom: MAX_BOTTOM,
+            ..screen
+        };
+        assert_eq!(
+            fit(&points, 0.3, -0.4, Lens::Perspective, tall),
+            fit(&points, 0.3, -0.4, Lens::Perspective, held)
         );
     }
 
@@ -792,6 +872,7 @@ mod tests {
             aspect: ASPECT,
             inset,
             right,
+            bottom: 0.0,
         };
         let mut views: Vec<View> = [Preset::Graph, Preset::Timeline, Preset::Free]
             .into_iter()

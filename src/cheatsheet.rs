@@ -18,7 +18,9 @@
 //!   the lines, the connectors and "now" carry an alpha meant for the
 //!   scene, so on the panel they are drawn whole, as the bar draws a kind's
 //!   swatch. The two brackets differ only in their alpha, so they keep it,
-//!   and over the panel's dark background look as they do over the scene's;
+//!   and over the panel's dark background look as they do over the scene's.
+//!   The pipeline strip's cells are in the colours of the palette its
+//!   pictures are drawn in (`strip.rs`);
 //! - the concepts, a few words each, for somebody who has not read the
 //!   design, saying nothing the scene does not draw.
 
@@ -34,6 +36,7 @@ use crate::scene::{
     BRACKET_COLOUR, INFERRED_BRACKET_COLOUR, NOW_COLOUR, kind_colour, relation_colour,
     succession_colour,
 };
+use crate::strip::{self, PALETTE};
 
 /// The panel's title while it shows the cheatsheet.
 pub const TITLE: &str = "Cheatsheet";
@@ -192,11 +195,29 @@ pub fn colour_groups() -> Vec<ColourGroup> {
                 ),
             ],
         },
+        ColourGroup {
+            caption: Some(PIPELINE_CELLS),
+            entries: vec![
+                entry(TRANSITION_LIT, strip::colour(PALETTE.transition_bright)),
+                entry(TRANSITION_RUNNING, strip::colour(PALETTE.running)),
+                entry(TRANSITION_FAILED, strip::colour(PALETTE.failed)),
+                entry(PLACE_HOLDING, strip::colour(PALETTE.place_bright)),
+            ],
+        },
     ]
 }
 
+/// The caption over the pipeline strip's colours.
+pub const PIPELINE_CELLS: &str =
+    "Cells of the pipeline strip: a light fades fast and leaves a trace that fades slowly";
+/// The pipeline strip's colours, each in the colour of its palette.
+pub const TRANSITION_LIT: &str = "a transition that fired";
+pub const TRANSITION_RUNNING: &str = "a transition in flight, its work under way";
+pub const TRANSITION_FAILED: &str = "a transition that failed";
+pub const PLACE_HOLDING: &str = "a place holding tokens, brighter the more it holds";
+
 /// The concepts, each a name and a sentence or two.
-pub const CONCEPTS: [Row; 12] = [
+pub const CONCEPTS: [Row; 13] = [
     (
         "Topic node",
         "A subject the memory holds material about. The largest discs.",
@@ -237,6 +258,10 @@ pub const CONCEPTS: [Row; 12] = [
     (
         "Log",
         "What the session has done: its acts, the advisories it was given and its pipeline runs. J shows it.",
+    ),
+    (
+        "Pipelines",
+        "The work the session runs, such as reading a document into claims, a search or a reflect. Along the bottom, each pipeline is a small picture with a cell for each step, a transition, and for each place where its work waits between steps, lit as it runs. Hover a cell to name it; a click opens the log on the pipeline runs, and K folds the strip away.",
     ),
     (
         "Session and graph",
@@ -408,6 +433,40 @@ mod tests {
                 }));
             }
         }
+    }
+
+    #[test]
+    fn the_strips_cells_are_in_the_colours_its_pictures_are_drawn_in() {
+        use petritype_activity::Palette;
+        assert_eq!(PALETTE, Palette::DARK);
+        for (words, rgb) in [
+            (TRANSITION_LIT, Palette::DARK.transition_bright),
+            (TRANSITION_RUNNING, Palette::DARK.running),
+            (TRANSITION_FAILED, Palette::DARK.failed),
+            (PLACE_HOLDING, Palette::DARK.place_bright),
+        ] {
+            assert_eq!(
+                colour_of(words).to_srgba().to_u8_array(),
+                [rgb.0, rgb.1, rgb.2, 255],
+                "{words}"
+            );
+        }
+        // A transition fully lit, in flight and failed, and a place full,
+        // are those colours in the palette's own reckoning.
+        assert_eq!(
+            PALETTE.transition(1.0, 0.0, false),
+            PALETTE.transition_bright
+        );
+        assert_eq!(PALETTE.transition(0.0, 0.0, true), PALETTE.running);
+        assert_eq!(PALETTE.transition(0.0, 1.0, false), PALETTE.failed);
+        assert_eq!(
+            PALETTE.place(1.0, 0.0, petritype_activity::HueMode::Kind),
+            PALETTE.place_bright
+        );
+        assert!(
+            CONCEPTS.iter().any(|(name, _)| *name == "Pipelines"),
+            "a line on pipelines among the concepts"
+        );
     }
 
     #[test]

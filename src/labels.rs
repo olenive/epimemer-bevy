@@ -1,10 +1,10 @@
 //! Labels (DESIGN.md §9): a budget of names, not a name for every node.
 //!
 //! In each update in which the focus, the hover, the camera, the viewport,
-//! the bar's height, the side panel's width or what the filter shows
-//! changed, every visible node whose disc is in front of the camera and
-//! inside the part of the viewport below the bar and left of the side
-//! panel is scored ([`score`]): by its distance from the focused node, or
+//! the bar's height, the side panel's width, the pipeline strip's height or
+//! what the filter shows changed, every visible node whose disc is in front
+//! of the camera and inside the part of the viewport below the bar, left of
+//! the side panel and above the pipeline strip is scored ([`score`]): by its distance from the focused node, or
 //! from the point the camera looks at when nothing is focused, as
 //! a share of how much of the scene the view spans there; by its kind,
 //! topics before inferences before facts; by its degree; and a little by
@@ -17,7 +17,7 @@
 //! beside its disc, to the right, to the left, above or below, and takes the
 //! first that overlaps nothing, so that a dense cluster of discs can still
 //! carry several labels; a place that would run under the bar, under the
-//! side panel or off the viewport is not offered. The focused and the hovered node are
+//! side panel, under the pipeline strip or off the viewport is not offered. The focused and the hovered node are
 //! accepted first, whatever they overlap, and topic names have a reserved
 //! share of the budget ([`TOPIC_SHARE`]) so that the map's place names are
 //! always there to read. The accepted labels fade with their rank
@@ -44,7 +44,9 @@ use bevy::camera::CameraUpdateSystems;
 use bevy::prelude::*;
 use bevy::ui::UiSystems;
 
-use crate::camera::{BarCover, FlyCamera, PanelCover, Places, look_at, orthographic_height};
+use crate::camera::{
+    BarCover, FlyCamera, PanelCover, Places, StripCover, look_at, orthographic_height,
+};
 use crate::filter::{RefreshShown, Shown, is_visible};
 use crate::focus::{Focus, Hovered};
 use crate::graph_index::GraphIndex;
@@ -528,6 +530,7 @@ struct Scene<'w> {
     hovered: Res<'w, Hovered>,
     cover: Res<'w, BarCover>,
     panel: Option<Res<'w, PanelCover>>,
+    strip: Option<Res<'w, StripCover>>,
 }
 
 /// Whether anything the labels are chosen from, other than the camera,
@@ -540,6 +543,7 @@ fn scene_changed(scene: &Scene) -> bool {
         || scene.hovered.is_changed()
         || scene.cover.is_changed()
         || scene.panel.as_ref().is_some_and(|panel| panel.is_changed())
+        || scene.strip.as_ref().is_some_and(|strip| strip.is_changed())
 }
 
 /// Chooses the labels, in any update in which what they depend on changed.
@@ -582,15 +586,19 @@ fn choose_labels(
         2.0 * depth * (FOV / 2.0).tan()
     });
     let global = GlobalTransform::from(*transform);
-    // The part of the viewport below the bar and left of the side panel,
-    // where a label can be read.
+    // The part of the viewport below the bar, left of the side panel and
+    // above the pipeline strip, where a label can be read.
     let panel = scene.panel.as_ref().map_or(0.0, |panel| panel.0);
+    let strip = scene.strip.as_ref().map_or(0.0, |strip| strip.0);
     let clear = Rect::from_corners(
         Vec2::new(
             viewport.min.x,
             viewport.min.y + scene.cover.0.unwrap_or(0.0) * viewport.height(),
         ),
-        Vec2::new(viewport.max.x - panel * viewport.width(), viewport.max.y),
+        Vec2::new(
+            viewport.max.x - panel * viewport.width(),
+            viewport.max.y - strip * viewport.height(),
+        ),
     );
 
     let index = &scene.index;

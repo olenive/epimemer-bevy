@@ -15,7 +15,9 @@
 //! presses too, and which shows the log in the side panel or returns the
 //! panel to the node (`event_log.rs`); the Help button, which `?` presses
 //! too, and which shows the cheatsheet in the side panel or returns the
-//! panel to what it showed (`cheatsheet.rs`); the time mode,
+//! panel to what it showed (`cheatsheet.rs`); the Pipelines button, which
+//! `K` presses too, and which folds the pipeline strip away or brings it
+//! back (`strip.rs`); the time mode,
 //! recorded time or claim time, which `C` switches too (`time_mode.rs`);
 //! the metacontexts, the node kinds, the status (active only, as the
 //! snapshot is); the topic subtree, the source document and the retrieval
@@ -27,7 +29,8 @@
 //! topics' embeddings and saves it (`relayout.rs`).
 //! Hovering a control says what it does at the end of the bar, where load
 //! errors are shown too, and what is drawn: the graph, its nodes, and the
-//! topic map, or why there is none.
+//! topic map, or why there is none. Hovering the pipeline strip says what
+//! is under the pointer there in the same place.
 //!
 //! A picker's list opens under its button and closes when an entry is
 //! chosen, when the button is pressed again, on Escape, or on a press
@@ -77,7 +80,7 @@ use crate::filter::{Filter, Kinds, Metacontexts, Mode, kind_passes};
 use crate::graph_index::GraphIndex;
 use crate::hub::{self, GraphList, SessionInfo};
 use crate::keys::{
-    BAR_KEY, EDGE_KEY, GO_KEY, HELP_KEY, LOG_KEY, RECALCULATE_KEY, SEARCH_KEY, VIEW_KEYS,
+    BAR_KEY, EDGE_KEY, GO_KEY, HELP_KEY, LOG_KEY, RECALCULATE_KEY, SEARCH_KEY, STRIP_KEY, VIEW_KEYS,
 };
 use crate::layout::Kind;
 use crate::live::{self, LiveState};
@@ -89,6 +92,7 @@ use crate::reload::{Catalogue, LoadGraph, LoadStatus};
 use crate::retrieval::{self, RetrievalRead, Retrievals};
 use crate::scene::kind_colour;
 use crate::search::{Search, SearchAction, SearchCount, SearchField};
+use crate::strip::{StripFolded, StripHover};
 use crate::time_axis::TimeMode;
 use crate::ui_focus::{UiFocus, is_ui, over_ui};
 
@@ -187,6 +191,8 @@ pub enum Control {
     /// Show the cheatsheet in the side panel, or return the panel to what
     /// it showed.
     Help,
+    /// Fold the pipeline strip away, or bring it back.
+    Pipelines,
     ClearTopic,
     ClearSource,
     ClearRetrieval,
@@ -279,6 +285,7 @@ const RETRIEVAL_HINT: &str = "The nodes one tool call handed the agent, from the
 const REFLECT_HINT: &str = "Stores since this graph's last reflect, against the count at which reflect is suggested. The hub reports it for the session's active graph only, so another graph shows a dash.";
 const LOG_HINT: &str = "The session's acts, advisories and pipeline runs, newest first, in the side panel in place of the focused node; J does the same, and again returns to the node.";
 const HELP_HINT: &str = "A cheatsheet of the controls, the colours and the concepts drawn, in the side panel in place of the focused node; ? does the same, and again returns the panel to what it showed.";
+const PIPELINES_HINT: &str = "The session's pipelines along the bottom, each a small picture lit by what it is doing; the strip appears once a pipeline starts. This folds it away or brings it back, as K does.";
 const SEARCH_HINT: &str = "Nodes whose text or description holds what is typed, ignoring case, among those drawn. / types here; Enter focuses the next hit, Shift+Enter the one before; Escape leaves the field.";
 
 /// The bar, its strip and its pickers.
@@ -313,6 +320,7 @@ impl Plugin for BarPlugin {
             .init_resource::<HelpOpen>()
             .init_resource::<PanelCollapsed>()
             .init_resource::<ReflectCounter>()
+            .init_resource::<StripFolded>()
             .add_message::<SearchAction>()
             .add_message::<RecalculateLayout>()
             .add_observer(on_click)
@@ -434,6 +442,7 @@ struct Act<'w> {
     pickers: Res<'w, Pickers>,
     retrievals: Res<'w, Retrievals>,
     shows: PanelShows<'w>,
+    folded: ResMut<'w, StripFolded>,
     views: MessageWriter<'w, ViewRequest>,
     loads: MessageWriter<'w, LoadGraph>,
     search: MessageWriter<'w, SearchAction>,
@@ -486,6 +495,7 @@ fn perform(control: &Control, act: &mut Act) {
             let next = press_help(act.shows.choice());
             act.shows.set(next);
         }
+        Control::Pipelines => act.folded.0 = !act.folded.0,
         Control::Kind(kind) => act.filter.kinds = toggle_kind(act.filter.kinds, *kind),
         Control::Mode => {
             act.filter.mode = match act.filter.mode {
@@ -955,17 +965,21 @@ type StyledControl = (
     Has<Row>,
 );
 
-/// Whether the log or the cheatsheet is what the side panel shows.
+/// Whether the log or the cheatsheet is what the side panel shows, and
+/// whether the pipeline strip is folded: what the Log, Help and Pipelines
+/// buttons show as chosen.
 #[derive(SystemParam)]
 struct PanelShown<'w> {
     log: Res<'w, LogOpen>,
     help: Res<'w, HelpOpen>,
     panel: Res<'w, PanelCollapsed>,
+    folded: Res<'w, StripFolded>,
 }
 
 /// Colours every control by whether it is chosen, under the pointer, or
 /// unable to do anything yet. The Log button is chosen while the panel
-/// shows the log, and the Help button while it shows the cheatsheet.
+/// shows the log, the Help button while it shows the cheatsheet, and the
+/// Pipelines button while the strip is not folded.
 fn style_controls(
     filter: Res<Filter>,
     catalogue: Res<Catalogue>,
@@ -980,6 +994,7 @@ fn style_controls(
         let selected = match control {
             Control::Log => shown.log.0 && !shown.help.0 && !shown.panel.0,
             Control::Help => shown.help.0 && !shown.panel.0,
+            Control::Pipelines => !shown.folded.0,
             _ => is_selected(control, &filter, &catalogue, *open, *edges, *mode),
         };
         let colour =
@@ -1013,17 +1028,20 @@ struct TextData<'w, 's> {
     live: Option<Res<'w, LiveState>>,
     retrievals: Option<Res<'w, Retrievals>>,
     reflect: Option<Res<'w, ReflectCounter>>,
+    strip: Option<Res<'w, StripHover>>,
     hints: Query<'w, 's, (&'static Interaction, &'static Hint)>,
 }
 
 /// Keeps every text the bar shows up to date, writing only those that
-/// change.
+/// change. The message line's hint is a hovered control's, or what the
+/// pointer over the pipeline strip says.
 fn update_texts(data: TextData, mut texts: Query<(&BarText, &mut Text, &mut TextColor)>) {
     let hint = data
         .hints
         .iter()
         .find(|(interaction, _)| **interaction != Interaction::None)
-        .map(|(_, hint)| hint.0);
+        .map(|(_, hint)| hint.0)
+        .or_else(|| data.strip.as_deref().and_then(|hover| hover.0.as_deref()));
     for (which, mut text, mut colour) in &mut texts {
         let (words, tone) = match which {
             BarText::Session => (
@@ -1322,6 +1340,11 @@ fn spawn_bar(mut commands: Commands, collapsed: Res<Collapsed>, search: Option<R
             ),
             hinted_button(&format!("Log ({})", LOG_KEY.1), Control::Log, LOG_HINT),
             hinted_button(&format!("Help ({})", HELP_KEY.1), Control::Help, HELP_HINT),
+            hinted_button(
+                &format!("Pipelines ({})", STRIP_KEY.1),
+                Control::Pipelines,
+                PIPELINES_HINT,
+            ),
             (
                 style::group_node(),
                 children![
@@ -1517,6 +1540,7 @@ mod tests {
             .init_resource::<LogOpen>()
             .init_resource::<HelpOpen>()
             .init_resource::<PanelCollapsed>()
+            .init_resource::<StripFolded>()
             .insert_resource(Pickers {
                 metacontexts: listed(&["a", "b"]),
                 ..Pickers::default()
@@ -1852,6 +1876,53 @@ mod tests {
             .map(|(_, text)| text.0.clone())
             .collect();
         assert_eq!(words, ["Help (?)"]);
+    }
+
+    #[test]
+    fn the_pipelines_button_folds_the_strip_and_brings_it_back() {
+        let mut app = app();
+        let pipelines = control(&mut app, &Control::Pipelines);
+        let mut texts = app.world_mut().query::<(&ChildOf, &Text)>();
+        let words: Vec<String> = texts
+            .iter(app.world())
+            .filter(|(parent, _)| parent.parent() == pipelines)
+            .map(|(_, text)| text.0.clone())
+            .collect();
+        assert_eq!(words, [format!("Pipelines ({})", STRIP_KEY.1)]);
+        assert_eq!(words, ["Pipelines (K)"]);
+        assert!(!app.world().resource::<StripFolded>().0);
+        click(&mut app, pipelines);
+        assert!(app.world().resource::<StripFolded>().0, "folded");
+        click(&mut app, pipelines);
+        assert!(!app.world().resource::<StripFolded>().0, "and back");
+    }
+
+    #[test]
+    fn hovering_the_strip_speaks_in_the_message_line_unless_a_control_is_hovered() {
+        let mut app = app();
+        app.init_resource::<GraphIndex>()
+            .init_resource::<LoadStatus>()
+            .init_resource::<Notice>()
+            .insert_resource(StripHover(Some("store: place claims, 3 tokens".into())))
+            .add_systems(Update, update_texts);
+        let line = |app: &mut App| {
+            let mut texts = app.world_mut().query::<(&BarText, &Text)>();
+            texts
+                .iter(app.world())
+                .find(|(which, _)| **which == BarText::Message)
+                .map(|(_, text)| text.0.clone())
+                .unwrap()
+        };
+        app.update();
+        assert_eq!(line(&mut app), "store: place claims, 3 tokens");
+        let log = control(&mut app, &Control::Log);
+        app.world_mut().entity_mut(log).insert(Interaction::Hovered);
+        app.update();
+        assert_eq!(line(&mut app), LOG_HINT, "a hovered control comes first");
+        app.world_mut().entity_mut(log).insert(Interaction::None);
+        app.insert_resource(StripHover(None));
+        app.update();
+        assert_eq!(line(&mut app), "", "nothing drawn, nothing hovered");
     }
 
     #[test]

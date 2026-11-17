@@ -11,7 +11,8 @@
 //! [`MIN_TICK_SPACING`] logical pixels between neighbours on the screen
 //! ([`choose_granularity`]), so zooming in brings finer ticks. Each tick is a
 //! short line into the map and a date in UI text to the left of the axis,
-//! placed with `Camera::world_to_viewport` as the labels are.
+//! placed with `Camera::world_to_viewport` as the labels are, and shown
+//! only between the bar and the pipeline strip.
 //!
 //! "Now", the timeline's reference time or the wall clock (`time_axis.rs`),
 //! has a tick of its own colour, a label, and a faint ring around the map
@@ -33,7 +34,7 @@ use bevy::prelude::*;
 use bevy::ui::UiSystems;
 use chrono::{Datelike, Months, NaiveDate};
 
-use crate::camera::{BarCover, Places};
+use crate::camera::{BarCover, Places, StripCover};
 use crate::clip::{clip_mark, clipped_counts, count_text, is_clipped};
 use crate::filter::{Shown, filter_alpha, is_visible};
 use crate::graph_index::GraphIndex;
@@ -415,6 +416,7 @@ struct Source<'w> {
     index: Res<'w, GraphIndex>,
     model: Option<Res<'w, TimeModel>>,
     cover: Res<'w, BarCover>,
+    strip: Option<Res<'w, StripCover>>,
     shown: Res<'w, Shown>,
 }
 
@@ -442,7 +444,9 @@ fn draw_axis(
         let global = GlobalTransform::from(*transform);
         let screen = |y: f32| camera.world_to_viewport(&global, at(y)).ok();
         let clear_top = viewport.min.y + source.cover.0.unwrap_or(0.0) * viewport.height();
-        let readable = |p: Vec2| p.y >= clear_top && viewport.contains(p);
+        let strip = source.strip.as_deref().map_or(0.0, |strip| strip.0);
+        let clear_bottom = viewport.max.y - strip * viewport.height();
+        let readable = |p: Vec2| p.y >= clear_top && p.y <= clear_bottom && viewport.contains(p);
         let claim = source.index.mode == TimeMode::Claim;
         let (before, after) = match source.model.as_deref() {
             Some(model) if claim => clipped_counts(&model.claim.spans, &source.shown.visible),

@@ -51,8 +51,9 @@
 //! asked for again to where the nodes now are.
 //!
 //! Every view is fitted to the part of the window below the bar, which the
-//! bar reports as [`BarCover`], and left of the side panel while it is
-//! open, which the panel reports as [`PanelCover`]. The bar is laid out only after the camera
+//! bar reports as [`BarCover`], left of the side panel while it is
+//! open, which the panel reports as [`PanelCover`], and above the pipeline
+//! strip while it is open, which the strip reports as [`StripCover`]. The bar is laid out only after the camera
 //! has been placed, so the starting view is fitted again, once, as soon as
 //! the bar's height is known; a view chosen meanwhile is left alone. With
 //! `fit_topic` set, a development affordance, the camera then fits the
@@ -154,6 +155,12 @@ pub struct BarCover(pub Option<f32>);
 /// and without a panel.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
 pub struct PanelCover(pub f32);
+
+/// The fraction of the viewport's height, from the bottom, that the
+/// pipeline strip covers while it is open (`strip.rs`); none while it is
+/// folded or has no tile, and without a strip.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
+pub struct StripCover(pub f32);
 
 /// A view the camera is asked to go to.
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
@@ -530,22 +537,24 @@ fn aspect(window: &Window) -> f32 {
     if height > 0.0 { width / height } else { 1.0 }
 }
 
-/// The window, and the bar and the side panel over it: what a view is
-/// fitted to.
+/// The window, and the bar, the side panel and the pipeline strip over it:
+/// what a view is fitted to.
 #[derive(SystemParam)]
 struct Viewport<'w, 's> {
     window: Single<'w, 's, &'static Window, With<PrimaryWindow>>,
     cover: Res<'w, BarCover>,
     panel: Option<Res<'w, PanelCover>>,
+    strip: Option<Res<'w, StripCover>>,
 }
 
-/// The screen a view is fitted to: the window's shape, less the bar and
-/// the side panel.
+/// The screen a view is fitted to: the window's shape, less the bar, the
+/// side panel and the pipeline strip.
 fn screen(viewport: &Viewport) -> Screen {
     Screen {
         aspect: aspect(&viewport.window),
         inset: viewport.cover.0.unwrap_or(0.0),
         right: viewport.panel.as_ref().map_or(0.0, |panel| panel.0),
+        bottom: viewport.strip.as_ref().map_or(0.0, |strip| strip.0),
     }
 }
 
@@ -1227,6 +1236,7 @@ mod tests {
             aspect: ASPECT,
             inset: 0.1,
             right: 0.0,
+            bottom: 0.0,
         };
         let topic = presets::region_view(
             &places.topics[&1],
@@ -1458,6 +1468,7 @@ mod tests {
             aspect: ASPECT,
             inset: 0.1,
             right: 0.0,
+            bottom: 0.0,
         };
         let below = |preset: Preset| {
             let places = places();
@@ -1483,6 +1494,7 @@ mod tests {
             aspect: ASPECT,
             inset: 0.1,
             right: 0.3,
+            bottom: 0.0,
         };
         let beside = |preset: Preset| {
             let places = places();
@@ -1496,6 +1508,28 @@ mod tests {
         press(&mut app, KeyCode::Digit3);
         settle(&mut app);
         assert_at(&mut app, &beside(Preset::Free));
+    }
+
+    #[test]
+    fn every_view_is_fitted_above_the_open_strip() {
+        let screen = Screen {
+            aspect: ASPECT,
+            inset: 0.1,
+            right: 0.0,
+            bottom: 0.12,
+        };
+        let above = |preset: Preset| {
+            let places = places();
+            presets::preset_view(preset, &places.points, &[], &[], places.now, screen)
+        };
+        let mut app = app(Preset::Graph);
+        app.insert_resource(StripCover(0.12));
+        app.insert_resource(BarCover(Some(0.1)));
+        app.update();
+        assert_at(&mut app, &above(Preset::Graph));
+        press(&mut app, KeyCode::Digit2);
+        settle(&mut app);
+        assert_at(&mut app, &above(Preset::Timeline));
     }
 
     #[test]

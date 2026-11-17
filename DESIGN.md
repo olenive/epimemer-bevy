@@ -3,7 +3,7 @@
 Status: written on 2026-10-20 during the planning discussion in the
 Epimemer repository and moved here the day this repository was created;
 this file is the design's only home. Slices 1 to 10 of §14 are built
-(2026-10-21), slice 11 was designed on 2026-11-17 (§10), and slices 12
+(2026-10-21), slice 11 was designed and built on 2026-11-17 (§10), and slices 12
 to 15 were added on 2026-11-07, when the owner decided this client replaces
 the dashboard (§1); slices 12 and 13 were built the same day. Slice 16 was added and built on 2026-11-17, when the owner asked for a cheatsheet in the client and a mouse that pans and zooms. The numbers in §3 were measured on the development graph
 on 2026-10-18, through the hub described in `VIZ_CONTRACT.md`, which is the
@@ -693,6 +693,29 @@ log. The cheatsheet gains `K` among the controls; among the colours, a
 transition lit, one in flight and one that failed, and a place holding
 tokens, each in the palette's own colour; and a line on pipelines among
 the concepts.
+
+What the build settled for the pipeline strip (slice 11, checked in the
+browser build against the development graph's session on 2026-11-17). A
+tile is 208 logical pixels wide, its picture in a box 200 by 40, with 12
+between tiles, and the strip is the bar's colour, 95 high in a window 913
+high, a tenth of it. The session's `retrieval` pipeline, 9 places and 7
+transitions, draws at 12 pixels a cell, the largest size. A fit leaves the
+strip's share of the height clear, to at most a quarter of the window, and
+is made when a view is next asked for, so the strip's arrival moves
+nothing. A `transition_fired` sets its tile back to "running" whatever it
+said, since a fire means a run is under way. `tokens_updated` sets the
+places it names and leaves the rest. The followed session's return from a
+disconnection counts as lost events, as a gap and the stream's own
+reconnect do. A click on a tile always opens the log and never closes it.
+The wheel over the strip moves it by the larger of its sideways and
+upright turn. A cell's hover reads "retrieval: place VectorResults, 0
+tokens" or "retrieval: transition plan_retrieval", and a tile's, away from
+its cells, says what the tile is. The page held 60 frames a second before
+any tile existed, with three tiles open and with the strip folded. A
+search made its `retrieval` tile and a store its `segmentation:paragraph`
+and `edge_creation` tiles, and a reflect its `reflect` tile, one long
+row at 8 pixels a cell, each with its run's duration. A failed run was
+not seen against a live hub; the tests cover it.
 
 The reflect counter (slice 13). The bar shows `reflect N/M`: the stores
 since the last reflect against the threshold at which reflect is

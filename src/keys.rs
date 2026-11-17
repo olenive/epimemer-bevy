@@ -4,7 +4,9 @@
 //!
 //! The bar's view buttons (`bar.rs`) are made from [`VIEW_KEYS`] too, and
 //! ask the camera for the same [`ViewRequest`] the key does, so a key and
-//! its button take one path. No key reaches the camera, the focus, the bar
+//! its button take one path; the bar's other buttons that have a key, Log,
+//! Help, Pipelines, Recalculate layout and the edge toggle among them, are
+//! named with the key from here. No key reaches the camera, the focus, the bar
 //! or the side panel while a text field in the bar is taking the keyboard,
 //! except Escape, Enter and Shift+Enter, which the search field reads.
 
@@ -72,6 +74,11 @@ pub const PANEL_KEY: (KeyCode, &str) = (KeyCode::KeyP, "P");
 /// the focused node, and its name in the help: `L`, for log, is the edge
 /// toggle, so `J`, for journal.
 pub const LOG_KEY: (KeyCode, &str) = (KeyCode::KeyJ, "J");
+
+/// The key that folds the pipeline strip away or brings it back, as the
+/// bar's Pipelines button does, and its name in the help: `K`, which no
+/// other key takes.
+pub const STRIP_KEY: (KeyCode, &str) = (KeyCode::KeyK, "K");
 
 /// The key that focuses the node focused before the current one, from the
 /// focus history, and its name in the help: `B`, for back.
@@ -224,6 +231,7 @@ pub fn key_rows() -> Vec<Row> {
         (MODE_KEY.1, MODE_KEY_WHAT),
         (PANEL_KEY.1, PANEL_KEY_WHAT),
         (LOG_KEY.1, LOG_KEY_WHAT),
+        (STRIP_KEY.1, STRIP_KEY_WHAT),
         (HELP_KEY.1, HELP_KEY_WHAT),
         (BACK_KEY.1, BACK_KEY_WHAT),
         (SEARCH_KEY.1, SEARCH_KEY_WHAT),
@@ -259,7 +267,7 @@ const LEFT_CLICK_WHAT: &str = "on a disc, or a node the side panel names: focus 
 const LEFT_DRAG_WHAT: &str =
     "pan: the scene follows the pointer; a drag never focuses or clears the focus";
 /// What the wheel does, for the help.
-const WHEEL_WHAT: &str = "zoom towards the pointer; over the bar or the side panel, scroll it";
+const WHEEL_WHAT: &str = "zoom towards the pointer; over the bar or the side panel, scroll it, and over the pipeline strip, scroll it sideways";
 /// What the wheel does with Shift held, for the help.
 const SHIFT_WHEEL_WHAT: &str = "make the keys move the camera slower or faster";
 /// What the bar's key does, for the help.
@@ -273,6 +281,9 @@ const CLEAR_FOCUS_WHAT: &str =
 const PANEL_KEY_WHAT: &str = "show or hide the side panel of the focused node";
 /// What the log's key does, for the help.
 const LOG_KEY_WHAT: &str = "show the log of acts, advisories and pipeline runs in the side panel, or return it to the focused node";
+/// What the strip's key does, for the help.
+const STRIP_KEY_WHAT: &str =
+    "fold the strip of the session's pipelines along the bottom away, or bring it back";
 /// What the back key does, for the help.
 const BACK_KEY_WHAT: &str = "focus the node focused before this one";
 /// What the search key does, for the help.
@@ -316,6 +327,7 @@ pub(crate) mod tests {
                 CLEAR_FOCUS_KEY.0,
                 PANEL_KEY.0,
                 LOG_KEY.0,
+                STRIP_KEY.0,
                 BACK_KEY.0,
                 SEARCH_KEY.0,
                 GO_KEY.0,
@@ -426,6 +438,7 @@ pub(crate) mod tests {
         for (key, what) in [
             (PANEL_KEY, PANEL_KEY_WHAT),
             (LOG_KEY, LOG_KEY_WHAT),
+            (STRIP_KEY, STRIP_KEY_WHAT),
             (BACK_KEY, BACK_KEY_WHAT),
             (GO_KEY, GO_KEY_WHAT),
             (RECALCULATE_KEY, RECALCULATE_KEY_WHAT),

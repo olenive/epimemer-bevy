@@ -6,7 +6,7 @@
 //! work. The hub it reads from, and the shapes it reads, are specified in the
 //! Epimemer repository's `dev-docs/VIZ_CONTRACT.md`.
 //!
-//! This is slices 1 to 10, 12 and 13 of that order: it reads one graph's snapshot from
+//! This is slices 1 to 14 and 16 of that order: it reads one graph's snapshot from
 //! the hub and draws every node on a time axis, topics on a map fitted from
 //! their embeddings and saved (DESIGN.md §7) and claims around them, in
 //! recorded time as a disc at the moment it was recorded and in claim time
@@ -25,9 +25,10 @@
 //! records, one of which the bar can choose to see what a tool call handed
 //! the agent (`retrieval.rs`), and its acts, advisories and pipeline runs,
 //! which the side panel shows as a log (`event_log.rs`), with the graph's
-//! reflect counter in the bar (`reflect_counter.rs`), and a cheatsheet of
+//! reflect counter in the bar (`reflect_counter.rs`), a cheatsheet of
 //! the controls, the colours and the concepts drawn, which the side panel
-//! shows on `?` (`cheatsheet.rs`). It builds for the browser as well
+//! shows on `?` (`cheatsheet.rs`), and the session's pipelines along the
+//! bottom, each a small picture lit as it runs (`strip.rs`). It builds for the browser as well
 //! as natively, from the same code: the reads and the stream run in the
 //! background over a transport each platform implements (`background.rs`,
 //! `hub.rs`, `stream.rs`), and in a browser the options come from the page's
@@ -72,6 +73,7 @@ mod retrieval;
 mod scene;
 mod search;
 mod stream;
+mod strip;
 mod time_axis;
 mod time_mode;
 mod topic_map;
@@ -113,6 +115,7 @@ use crate::retrieval::RetrievalPlugin;
 use crate::scene::{Nodes, ScenePlugin};
 use crate::search::{Search, SearchPlugin};
 use crate::stream::{Stream, Subscription};
+use crate::strip::{STRIP_STATES, StripPlugin};
 use crate::time_axis::{MODE_NAMES, TimeMode};
 use crate::time_mode::TimeModePlugin;
 use crate::topic_map::Purpose;
@@ -176,6 +179,9 @@ Filters, which dim the nodes that fail them:
                       log in the side panel; or help, open with the
                       cheatsheet of the controls, the colours and the
                       concepts in the side panel
+  --strip STATE       how the strip of the session's pipelines along the
+                      bottom starts: open (the default) or folded, as K
+                      folds it
   --screenshot PATH   save a PNG of the view and the bar once the scene is
                       drawn, then exit
   --screenshot-after SECONDS
@@ -224,6 +230,8 @@ struct Args {
     dump_layout: Option<PathBuf>,
     filter: FilterArgs,
     ui_state: UiState,
+    /// Start with the pipeline strip folded.
+    strip_folded: bool,
     screenshot: Option<PathBuf>,
     /// How long after the start to take the screenshot.
     screenshot_after: Option<Duration>,
@@ -278,6 +286,7 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Command, St
         dump_layout: None,
         filter: FilterArgs::default(),
         ui_state: UiState::Open,
+        strip_folded: false,
         screenshot: None,
         screenshot_after: None,
         log_events: false,
@@ -334,6 +343,11 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Command, St
                 let state = value()?;
                 args.ui_state = bar::parse_ui_state(&state)
                     .ok_or_else(|| format!("--ui-state takes {UI_STATES}, not {state}"))?;
+            }
+            "--strip" => {
+                let state = value()?;
+                args.strip_folded = strip::parse_strip(&state)
+                    .ok_or_else(|| format!("--strip takes {STRIP_STATES}, not {state}"))?;
             }
             "--screenshot" => args.screenshot = Some(value()?.into()),
             "--layout-dir" => args.layout_dir = Some(value()?.into()),
@@ -875,6 +889,9 @@ fn assemble(app: &mut App, args: Args, start: Start) {
             wanted: args.filter.retrieval.clone(),
         })
         .add_plugins(ReflectPlugin)
+        .add_plugins(StripPlugin {
+            folded: args.strip_folded,
+        })
         .insert_resource(status);
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -1332,6 +1349,26 @@ mod tests {
             let error = browser_args(query).unwrap_err();
             assert!(error.contains(reason), "{query}: {error}");
         }
+    }
+
+    #[test]
+    fn the_strip_starts_open_or_folded_from_the_command_line_or_the_page() {
+        assert!(!run("").strip_folded, "open by default");
+        assert!(!run("--strip open").strip_folded);
+        assert!(run("--strip folded").strip_folded);
+        assert!(run("--strip=folded").strip_folded);
+        assert!(
+            parse("--strip sideways")
+                .unwrap_err()
+                .contains("--strip takes open or folded, not sideways")
+        );
+        assert!(parse("--strip").unwrap_err().contains("needs a value"));
+        assert!(
+            matches!(browser_args("?strip=folded"), Ok(Command::Run(args)) if args.strip_folded)
+        );
+        assert!(
+            matches!(browser_args("?graph=memory"), Ok(Command::Run(args)) if !args.strip_folded)
+        );
     }
 
     #[test]

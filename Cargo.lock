@@ -2467,6 +2467,9 @@ dependencies = [
  "bevy",
  "chrono",
  "js-sys",
+ "petritype",
+ "petritype-activity",
+ "petritype-layout",
  "serde",
  "serde_json",
  "tungstenite",
@@ -4227,6 +4230,42 @@ dependencies = [
  "indexmap",
  "serde",
  "serde_derive",
+]
+
+[[package]]
+name = "petritype"
+version = "0.1.0"
+source = "git+https://github.com/olenive/petritype-rs?rev=d6b0a8f9cfdac87117d333dfbe7da65b967cf5ba#d6b0a8f9cfdac87117d333dfbe7da65b967cf5ba"
+dependencies = [
+ "petritype-derive",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "petritype-activity"
+version = "0.1.0"
+source = "git+https://github.com/olenive/petritype-rs?rev=d6b0a8f9cfdac87117d333dfbe7da65b967cf5ba#d6b0a8f9cfdac87117d333dfbe7da65b967cf5ba"
+dependencies = [
+ "petritype",
+ "petritype-layout",
+]
+
+[[package]]
+name = "petritype-derive"
+version = "0.1.0"
+source = "git+https://github.com/olenive/petritype-rs?rev=d6b0a8f9cfdac87117d333dfbe7da65b967cf5ba#d6b0a8f9cfdac87117d333dfbe7da65b967cf5ba"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
+]
+
+[[package]]
+name = "petritype-layout"
+version = "0.1.0"
+source = "git+https://github.com/olenive/petritype-rs?rev=d6b0a8f9cfdac87117d333dfbe7da65b967cf5ba#d6b0a8f9cfdac87117d333dfbe7da65b967cf5ba"
+dependencies = [
+ "petritype",
 ]
 
 [[package]]

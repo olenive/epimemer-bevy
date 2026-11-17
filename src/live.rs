@@ -23,12 +23,16 @@
 //! Retrieval picker at once, whatever graph it is of and whether or not a
 //! graph is being read, since it changes nothing drawn (`retrieval.rs`).
 //! The acts, the advisories and the pipeline events of the session followed
-//! are kept for the log in the same way (`event_log.rs`), and a
-//! `reflect_counter_updated` of the session and graph followed sets the
-//! bar's reflect counter (`reflect_counter.rs`); a body among these that
-//! does not read is logged and changes nothing, since nothing drawn
-//! depends on it. An event for another session or another graph is
-//! dropped, and so are the events this client does not act on.
+//! are kept for the log in the same way (`event_log.rs`), and the pipeline
+//! events reach their tiles in the pipeline strip too (`strip.rs`), which
+//! is told when events may have been lost: on a gap in `seq`, on the
+//! stream's own reconnect, and when the session followed comes back from a
+//! disconnection. A `reflect_counter_updated` of the session and graph
+//! followed sets the bar's reflect counter (`reflect_counter.rs`). A body
+//! among these that does not read is logged and changes nothing, and the
+//! graph is not read again for it, since the graph drawn does not depend on
+//! it. An event for another session or another graph is dropped, and so
+//! are the events this client does not act on.
 //!
 //! [`LiveState`] says how the stream stands, for the bar: connected, lost
 //! and trying again with the last error, or reading the graph again; and
@@ -54,6 +58,7 @@ use crate::retrieval::{self, Retrievals};
 use crate::stream::{
     self, Envelope, Event, Item, Message, PIPELINE_EVENTS, Pipeline, Stream, Subscription, System,
 };
+use crate::strip;
 use crate::time_axis::{TimeMode, TimeModel};
 use crate::time_mode;
 
@@ -230,6 +235,8 @@ fn take(
             if state.log_events {
                 eprintln!("stream: connected (connection {connection})");
             }
+            // A run may have ended while the stream was away.
+            strip::events_lost(world);
             if state.subscribed_before_load == Some(connection) {
                 state.subscribed_before_load = None;
             } else {
@@ -264,6 +271,7 @@ fn take(
                         state,
                         format!("a gap in the event stream, seq {seq} after {last}"),
                     );
+                    strip::events_lost(world);
                 }
                 state.last_seq = Some(seq);
             }
@@ -316,13 +324,23 @@ fn route(
         Event::ActRecorded(_) | Event::AdvisoryRaised(_) | Event::Pipeline(_) => {
             let ours = envelope.session_id == session;
             let kept = ours && keep_entry(world, &envelope);
+            let drawn = match &envelope.event {
+                Event::Pipeline(pipeline) if ours => {
+                    strip::receive_event(world, &envelope.session_id, pipeline)
+                }
+                _ => None,
+            };
             if state.log_events {
                 let did = match (ours, kept) {
                     (false, _) => "about another session",
                     (true, true) => "kept for the log",
                     (true, false) => "held already",
                 };
-                eprintln!("{}", beside_line(seq, &envelope, did));
+                let did = match drawn {
+                    Some(took) => format!("{did}; {}", strip::took_text(took)),
+                    None => did.to_owned(),
+                };
+                eprintln!("{}", beside_line(seq, &envelope, &did));
             }
             return;
         }
@@ -458,6 +476,7 @@ fn system_message(world: &mut World, state: &mut LiveState, system: System) {
                         state,
                         "the session followed is connected to the hub again, and the events it sent meanwhile were dropped".into(),
                     );
+                    strip::events_lost(world);
                 }
             }
         }
@@ -1128,6 +1147,119 @@ mod tests {
             refetches(&mut app).is_empty(),
             "nothing drawn depends on them, so nothing is read again"
         );
+    }
+
+    #[test]
+    fn pipeline_events_reach_the_strip_and_lost_events_mark_a_running_tile_unknown() {
+        use crate::stream::TopologyEdge;
+        use crate::strip::{Status, Strip};
+        let (mut app, items, _commands) = app(&small());
+        app.init_resource::<Strip>().init_resource::<Log>();
+        items.send(Item::Connected { connection: 1 }).unwrap();
+        let pipeline = |seq, event: Pipeline, session: &str| {
+            Item::Message(Message::Event {
+                seq: Some(seq),
+                envelope: Box::new(Envelope {
+                    event_type: "a pipeline event".into(),
+                    session_id: session.into(),
+                    graph: String::new(),
+                    timestamp: "2026-11-17T10:00:00Z".into(),
+                    event: Event::Pipeline(Box::new(event)),
+                }),
+            })
+        };
+        let started = |name: &str| Pipeline::Started {
+            pipeline_name: name.into(),
+            place_names: vec!["start".into(), "done".into()],
+            transition_names: vec!["go".into()],
+            edges: vec![
+                TopologyEdge {
+                    source: "start".into(),
+                    target: "go".into(),
+                    label: None,
+                },
+                TopologyEdge {
+                    source: "go".into(),
+                    target: "done".into(),
+                    label: None,
+                },
+            ],
+        };
+        let fired = |name: &str| Pipeline::TransitionFired {
+            pipeline_name: name.into(),
+            transition_name: "go".into(),
+            input_places: vec!["start".into()],
+        };
+        let in_flight = |app: &App| {
+            let tile = &app.world().resource::<Strip>().tiles[0];
+            let go = tile.net.transition("go").unwrap();
+            tile.activity.transition(go).unwrap().in_flight
+        };
+        let status = |app: &App| app.world().resource::<Strip>().tiles[0].status.clone();
+        for item in [
+            pipeline(1, started("store"), SESSION),
+            pipeline(2, fired("store"), SESSION),
+            // A run already underway when the client came, and another
+            // session's start.
+            pipeline(3, fired("retrieval"), SESSION),
+            pipeline(4, started("reflect"), "someone-else"),
+        ] {
+            items.send(item).unwrap();
+        }
+        app.update();
+        let strip = app.world().resource::<Strip>();
+        assert_eq!(strip.session, SESSION);
+        assert_eq!(
+            strip
+                .tiles
+                .iter()
+                .map(|t| t.name.as_str())
+                .collect::<Vec<_>>(),
+            ["store"]
+        );
+        assert!(in_flight(&app));
+        assert_eq!(status(&app), Status::Running);
+        assert_eq!(
+            app.world().resource::<Log>().pipeline.len(),
+            3,
+            "the log keeps its lines"
+        );
+
+        // seq 5 never comes.
+        items
+            .send(pipeline(6, fired("retrieval"), SESSION))
+            .unwrap();
+        app.update();
+        assert!(!in_flight(&app), "a gap ends every flight");
+        assert_eq!(status(&app), Status::Unknown);
+
+        items.send(pipeline(7, fired("store"), SESSION)).unwrap();
+        app.update();
+        assert_eq!(status(&app), Status::Running);
+        items.send(Item::Connected { connection: 2 }).unwrap();
+        app.update();
+        assert!(!in_flight(&app), "and so does a reconnect");
+        assert_eq!(status(&app), Status::Unknown);
+
+        // The session followed drops off the hub and comes back.
+        items.send(pipeline(1, fired("store"), SESSION)).unwrap();
+        let system = |seq, system| {
+            Item::Message(Message::System {
+                seq: Some(seq),
+                system,
+            })
+        };
+        items
+            .send(system(2, System::SessionDisconnected(SESSION.into())))
+            .unwrap();
+        app.update();
+        assert_eq!(status(&app), Status::Running);
+        items
+            .send(system(3, System::SessionConnected(session(SESSION))))
+            .unwrap();
+        app.update();
+        assert!(!in_flight(&app));
+        assert_eq!(status(&app), Status::Unknown);
     }
 
     #[test]
