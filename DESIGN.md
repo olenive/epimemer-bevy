@@ -820,9 +820,10 @@ dashboard, both additive, so the schema stays 1:
   last 20 retrieval records; pipeline events, `pipeline_started` and its
   topology among them, are never replayed.
 
-The hub is to serve this client's browser bundle from a directory that
+The hub serves this client's browser bundle from a directory that
 `epimemer viz fetch` fills with a pinned, checksummed release of this
-repository; that Epimemer change is not made yet.
+repository. Both are written on Epimemer's `visualiser-changeover` branch
+and are in no Epimemer release yet (checked 2026-11-17).
 
 The contract names what is not promised: positions, as-of snapshots,
 embeddings for segments, the contents of `metadata`, and `claim_kind` on the
@@ -862,8 +863,7 @@ only backend: Bevy's `webgpu` feature replaces WebGL2 rather than falling
 back to it, so WebGPU would be a second bundle, and nothing the scene draws
 needs it. `trunk serve` is the development server and passes `/api` and
 `/ws` on to the hub, so no CORS is needed; the deployment is the hub
-serving the bundle from a static directory, an Epimemer change not made
-yet. Slice 2 keeps the topic map in local storage there (§7).
+serving the bundle from a directory (§12). Slice 2 keeps the topic map in local storage there (§7).
 
 **What slice 14 settled.** A tag `vX.Y.Z` releases the browser bundle.
 `.github/workflows/release.yml` fails unless the tag is `v` followed by the
@@ -879,10 +879,11 @@ for every platform, with stable Rust from the runner's rustup and `just`
 and `trunk` as prebuilt binaries at the versions the local build used. Built
 locally for 0.2.0, the bundle is 29.2 MB, its `.wasm` 28.7 MB, and the
 tarball 9.5 MB. The bundle names its script and `.wasm` from the root of
-its origin, so the hub's directory is to be served at `/`, or a bundle for
-a mount below the root is built with `--public-url`. The acceptance's
-browser half waits for that directory and `epimemer viz fetch`, which are
-not in Epimemer yet.
+its origin, so the hub serves its directory at `/`. The acceptance's
+browser half was run on 2026-11-17 against a hub started from Epimemer's
+`visualiser-changeover` branch. 0.2.0 loaded the development graph with
+one console error, the browser's request for a page icon the bundle did
+not have; 0.2.1, which declares its icon in the page, loaded it with none.
 
 **As-of scrubbing.** If Epimemer grows an as-of snapshot route, a scrubber
 on the time axis shows the graph as it was, and the recorded-time mode

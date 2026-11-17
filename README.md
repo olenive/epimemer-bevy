@@ -518,11 +518,13 @@ minutes. The bundle has to be served from the hub's own origin, for the
 reason above, and there are two ways to do that:
 
 - `trunk serve`, as above, which is for development.
-- The hub serving `dist/` from a static directory, beside the dashboard it
-  serves already, which needs no proxy. That is a change on the Epimemer
-  side and is not made yet: a static mount on the hub's application, and
-  the bundle built with `trunk build --release --public-url /PATH/` when
-  it is mounted below the root.
+- The hub serving the bundle itself, at the root of its origin, which needs
+  no proxy. Epimemer's `epimemer viz fetch` downloads a pinned release of
+  this repository, checks it against its checksum and unpacks it into
+  `~/.epimemer/viz/current`, which the hub serves; `EPIMEMER_VIZ_BUNDLE_DIR`
+  names another directory to serve, such as this checkout's `dist/`. Both
+  are written on Epimemer's `visualiser-changeover` branch and are in no
+  Epimemer release yet (checked 2026-11-17).
 
 A separate static server would need the hub to send CORS headers, which is
 also an Epimemer change.
@@ -532,10 +534,8 @@ release of the bundle (`.github/workflows/release.yml`) with two assets:
 `epimemer-bevy-web-vX.Y.Z.tar.gz`, whose top level is the files of
 `dist/`, and `epimemer-bevy-web-vX.Y.Z.tar.gz.sha256`, which
 `sha256sum -c` verifies in the directory that holds both. The released
-bundle is built for the root of its origin. The deployment is the hub
-serving the unpacked bundle from a directory, and the release asset is what
-Epimemer's `epimemer viz fetch` is to fetch into it; neither the directory
-nor the command is in Epimemer yet.
+bundle is built for the root of its origin, and it is what
+`epimemer viz fetch` downloads.
 
 The bundle draws with WebGL2, which every current browser has. Bevy's
 `webgpu` feature draws with WebGPU instead, but a bundle built with it has

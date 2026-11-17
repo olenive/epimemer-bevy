@@ -16,8 +16,9 @@ serde_json = "1.0.154"
 # `Instant` and `SystemTime` that work in a browser as well, where std's
 # panic; on a native target they are std's own.
 web-time = "1.1.0"
-# No Petritype crate here: the knowledge graph is not a Petri net. petritype-bevy
-# arrives with the activity bar (DESIGN.md §13) and not before.
+# No Petritype crate yet: the knowledge graph is not a Petri net.
+# petritype-activity and petritype-layout arrive with the pipeline strip
+# (DESIGN.md §10), and petritype-bevy is not needed.
 
 # The native transports, blocking, each on a thread of its own.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

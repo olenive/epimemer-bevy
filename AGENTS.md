@@ -6,7 +6,7 @@
 
 # Code
 - Rust and Bevy 0.19, native and browser from one crate: the browser build (`just wasm`, `trunk serve`) must keep passing `just check-wasm`. Bevy UI for menus and panels.
-- The only coupling to Epimemer is the contract in the Epimemer repository's `dev-docs/VIZ_CONTRACT.md`: HTTP and WebSocket JSON from the hub. Nothing here imports Epimemer, and nothing here depends on a Petritype crate until the activity bar (`DESIGN.md` §13).
+- The only coupling to Epimemer is the contract in the Epimemer repository's `dev-docs/VIZ_CONTRACT.md`: HTTP and WebSocket JSON from the hub. Nothing here imports Epimemer. The Petritype crates that draw nothing, `petritype-activity` and `petritype-layout`, enter only for the pipeline strip (`DESIGN.md` §10), and `petritype-bevy` is not a dependency.
 - Read-only client: it records no verdict and changes no setting on the server.
 - No global mutable state; pass configuration as values and keep state in Bevy resources and components.
 - Gates before hand-over: `just check` (the suite, clippy with warnings denied, `cargo fmt --check`); `just` lists the recipes.
@@ -14,6 +14,7 @@
 # Writing
 - Plain English: technical terms yes, jargon no. Commas or a second sentence, never em-dashes. Say what is true rather than what is not. Name the thing, never an issue number.
 - Epimemer's vocabulary: topic node, metacontext, source node. A tag is only the string in a tag list.
+- A statement about another repository, Epimemer or the Petritype crates, says when it was checked. Check that repository as it stands before planning on the statement, and correct the statement here when the repository has moved.
 
 # Memory
 - Epimemer graph `epimemer-dev`, tag `epimemer-bevy`, metacontext `the-real`. Stores stay high level, never verbatim code or docs. Read the server's guide before nontrivial memory work.
