@@ -2462,7 +2462,7 @@ dependencies = [
 
 [[package]]
 name = "epimemer-bevy"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "bevy",
  "chrono",
