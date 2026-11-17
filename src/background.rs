@@ -172,7 +172,7 @@ mod tests {
     fn background_work_answers_once_and_a_panic_reads_as_lost() {
         let pending = in_background("test", || async { 42 }).unwrap();
         assert_eq!(wait_for(&pending), Poll::Ready(42));
-        assert_eq!(poll(&pending), Poll::Lost, "the work has ended");
+        assert_eq!(wait_for(&pending), Poll::Lost, "the work has ended");
         let lost: Pending<u8> = in_background("test", || async { panic!("on purpose") }).unwrap();
         assert_eq!(wait_for(&lost), Poll::Lost);
     }
