@@ -3,7 +3,7 @@
 Status: written on 2026-10-20 during the planning discussion in the
 Epimemer repository and moved here the day this repository was created;
 this file is the design's only home. Slices 1 to 10 of §14 are built
-(2026-10-21), slice 11 waits on its Petritype prerequisites, and slices 12
+(2026-10-21), slice 11 was designed on 2026-11-17 (§10), and slices 12
 to 15 were added on 2026-11-07, when the owner decided this client replaces
 the dashboard (§1); slices 12 and 13 were built the same day. Slice 16 was added and built on 2026-11-17, when the owner asked for a cheatsheet in the client and a mouse that pans and zooms. The numbers in §3 were measured on the development graph
 on 2026-10-18, through the hub described in `VIZ_CONTRACT.md`, which is the
@@ -26,8 +26,8 @@ whose period is only vaguely known looks different from both.
 
 Why Bevy rather than a faster browser renderer: the user's other visual
 work (`petritype-bevy`) is on this stack, the same code builds native and
-for the browser, and the eventual activity bar (§13) reuses `petritype-bevy`
-directly. The smoothness itself comes from drawing on the GPU with a layout
+for the browser, and the pipeline strip (§10) is drawn from the Petritype
+crates that `petritype-bevy` draws its own thumbnail from. The smoothness itself comes from drawing on the GPU with a layout
 computed once, which any GPU renderer would give; Rust is the reason the
 rest of the stack lines up, and is an honest preference.
 
@@ -58,7 +58,7 @@ re-litigated without them.
 | Stack | Rust and Bevy 0.19. No Three.js prototype first; the hypothesis is tested in Bevy. |
 | Menus, filters, panels | Bevy UI, kept to a short fixed set (§10). |
 | Coupling to Epimemer | The contract in `VIZ_CONTRACT.md` and nothing else: HTTP and WebSocket JSON from the hub. Whether the server behind the hub is Python or Rust is invisible here, and the decision to port Epimemer's pipelines to `petritype-rs` is a separate one this client does not depend on. |
-| Petritype crates | Enter only for the activity bar (§13), never for the graph scene. The knowledge graph is not a Petri net. |
+| Petritype crates | `petritype-activity` and `petritype-layout`, with the `petritype` core they depend on, enter only for the pipeline strip (§10), never for the graph scene. The knowledge graph is not a Petri net. `petritype-bevy` is not a dependency: it is a whole application, and the strip needs only the crates under it. |
 | The three views | One scene, three camera presets (§6). |
 | Translucent columns | Additive blending, accepted as the order-independent choice (§8). |
 | Labels | A budget with greedy overlap rejection, not a label per node (§9). |
@@ -508,7 +508,8 @@ The rules:
 
 ## 10. Filters and the interface
 
-All Bevy UI, a bar along the top and a panel on the right, both collapsible.
+All Bevy UI: a bar along the top, a panel on the right and a strip along
+the bottom, each collapsible.
 The set is fixed; a filter not on this list is a design change:
 
 | Control | What it does |
@@ -529,6 +530,7 @@ The set is fixed; a filter not on this list is a design change:
 | Side panel | The focused node in full, its edges by class, its timepoints, its validity brackets, and the connectors' far ends by name. |
 | Log | The session's acts, advisories and pipeline runs, newest first, filtered by kind, in place of the side panel's node (slice 13). |
 | Cheatsheet | The controls, what the colours mean and the concepts drawn, in place of the side panel's node (slice 16). |
+| Pipeline strip | The session's pipelines along the bottom, each a small picture lit by what the pipeline is doing; it folds away (slice 11). |
 
 Filtering dims rather than removes by default (§8), with a "hide" variant
 for when the user wants the filtered-out nodes gone from the budget and the
@@ -615,6 +617,83 @@ metacontext; focus, filters, retrievals and the log; session and graph.
 The text is for somebody who has not read this design, and says nothing
 the scene does not draw. `--ui-state help` opens it from the start.
 
+The pipeline strip (slice 11). A row of tiles along the bottom of the
+window, to the left of the side panel, one tile for each pipeline the
+session followed has started since the client connected:
+`segmentation:semantic`, `edge_creation`, `retrieval`, `reflect` and the
+rest, in the order each first started. A tile is a small picture of the
+pipeline's net with two lines under it: the pipeline's name, and what its
+latest run is doing or did, "running", "done in 1.2 s" or "failed". `K`,
+or the bar's Pipelines button, folds the strip away and brings it back,
+and `--strip folded` starts it folded. The strip takes no room until a
+pipeline has started; while it is open, every view is fitted and every
+label placed above it, as they are below the bar.
+
+The picture is Petritype's activity thumbnail: one square cell for each
+place and each transition, set out by rank from left to right, so that a
+pipeline reads in the direction it runs. A transition lights when it fires
+and stays at full brightness while its body runs. A place lights when
+tokens enter or leave it, and glows by how many it holds. A transition
+that failed takes the failed colour. A light fades fast and leaves a trace
+that fades slowly, so a pipeline that ran a minute ago still shows where.
+The levels and the colours come from `petritype-activity`, at its default
+settings and with its dark palette, and the cells' positions from
+`petritype-layout`; this client only draws them, so the strip reads as the
+thumbnail in `petritype-bevy` does. Every tile has one cell size, the
+largest whole number of pixels from 2 to 12 at which every pipeline's grid
+fits a box 200 wide and 40 high; a net too large for the box still shows
+whole, at 2 pixels a cell, and its tile grows. Tiles wider than the room
+scroll sideways under the wheel.
+
+Hovering a cell names its place or transition in the bar's message line,
+with a place's count, and a click on a tile opens the log on its Pipelines
+filter. The dashboard's detail view, the net drawn with arrows and labels,
+is not carried over: `petritype-bevy` is the viewer for a net in full.
+
+How the events drive it. `pipeline_started` makes the pipeline's tile. For
+a pipeline that has one, the picture is kept when the topology is the one
+it was made from and made again when it is not, and either way nothing
+stays in flight from a run that never ended. Petritype knows a place or a
+transition by a number, which here is its position in the event's
+`place_names` or `transition_names`. An edge runs from a place to a
+transition or from a transition to a place, told by which list each end's
+name is in; an edge that is neither is logged and left out.
+`transition_fired` launches its transition and lights each input place as
+one token taken. `transition_completed` ends the flight and lights each
+output place as one token added. `tokens_updated` then sets every place's
+count to what the hub says, which is the only count the strip trusts.
+`pipeline_failed` marks the transition it names as failed, and it and
+`pipeline_completed` end every flight of the tile and write its second
+line. An event for a pipeline with no tile, one already underway when the
+client connected, is left to the log, since the topology is not replayed,
+and the tile comes with the pipeline's next start. The events carry no run
+id, so two runs of one pipeline at once light one tile. A gap in `seq` or
+a reconnect ends every flight and marks a running tile "unknown", since
+the run's end may have been missed. A switch to another session empties
+the strip; a switch of graph does not, since a pipeline event names no
+graph. The log keeps its pipeline lines (§11): the strip shows where a run
+is, and the log what happened and how long it took.
+
+What the strip costs. It is Bevy UI, drawn by the one camera that draws
+the bar and the side panel: there is no second camera and no second scene.
+A tile's picture is a texture of one pixel a cell, scaled up unsmoothed,
+and its few dozen bytes are written again only on a frame where a cell's
+colour changed. Folded, the strip's nodes do not exist, and nothing is
+painted or advanced. An event still reaches its tile's model, which is
+first brought forward to the moment the event came, and unfolding brings
+every model forward to the present, so the strip then shows what it would
+have shown had it stayed open. A folded strip does no work in a frame, and
+an open one whose lights have all faded writes no texture.
+
+The three Petritype crates come from the `petritype-rs` repository at a
+pinned commit, as a git dependency, until they are published to crates.io,
+when the pin becomes a version. The strip uses the model, the grid and the
+thumbnail of `petritype-activity`, and neither its record nor its event
+log. The cheatsheet gains `K` among the controls; among the colours, a
+transition lit, one in flight and one that failed, and a place holding
+tokens, each in the palette's own colour; and a line on pipelines among
+the concepts.
+
 The reflect counter (slice 13). The bar shows `reflect N/M`: the stores
 since the last reflect against the threshold at which reflect is
 suggested, followed by "suggested", in the accent colour, while the hub
@@ -665,7 +744,7 @@ The client fetches the snapshot once and then applies the `/ws` stream:
 | `retrieval_recorded` | Keep the record for the Retrieval picker (§10), once by its `record_id`; nothing drawn changes. |
 | `graph_action_recorded`, `advisory_raised` | Keep the entry for the log (§10), once by its `action_id`; nothing drawn changes. |
 | `reflect_counter_updated` | Set the bar's reflect counter of the graph it names (§10). |
-| The six pipeline events | A line in the log, or a duration added to one (below). |
+| The six pipeline events | A line in the log, or a duration added to one (below), and the pipeline's tile in the strip (§10). |
 | `session_connected`, `session_disconnected`, `session_dropped` | Update the session picker; a `session_connected` for the followed session refetches the snapshot, because events during the session's disconnection were dropped. |
 | A `seq` gap, or the client's own reconnect | Refetch the snapshot. |
 
@@ -676,9 +755,9 @@ the pipeline events are taken as they come, even while a graph is being
 read, since none of them changes anything drawn, and a body among them
 that does not read is logged and dropped without reading the graph again.
 
-The log makes its pipeline lines from the events until the activity bar
-draws the runs (§13). `pipeline_started` is a line naming how many
-transitions and places its topology has; `transition_fired` is a line
+The log makes its pipeline lines from the events. `pipeline_started` is a
+line naming how many transitions and places its topology has;
+`transition_fired` is a line
 naming the transition, and the `transition_completed` that follows adds
 its duration to the oldest such line still without one, or makes a line
 of its own where the fire came before the client did; `pipeline_completed`
@@ -688,7 +767,7 @@ long the run took, and a failure names the transition and the error.
 already underway when the client connects shows from its next event,
 since the topology is not replayed, and two runs of one pipeline at once
 interleave their lines. The topology is parsed and kept on the event for
-the activity bar, and the log keeps only its counts.
+the pipeline strip (§10), and the log keeps only its counts.
 
 What the build settled (slice 8, 2026-10-20). The client subscribes before
 it reads the snapshot, so an event between the two waits in the stream's
@@ -756,19 +835,6 @@ show how often it matters), and CORS headers (needed only by the wasm build
 served from another origin, §13).
 
 ## 13. Later work
-
-**The activity bar.** A strip along the bottom showing Epimemer's Petri net
-pipelines (segment, store, reflect and the rest) as small live glyphs lit by
-`transition_fired` and the other pipeline events, the way the dashboard's
-pipeline strip does, and the thing the user is drafting as an "activity
-thumbnail" in `petritype-bevy`. This is where `petritype-bevy` enters, as a
-crate dependency, and where its prerequisites bind: an input that mirrors a
-net the app does not run, driven by an external event stream rather than an
-in-process `Net` (its remote source is halfway there), a wasm target, and
-`petritype-rs` and `petritype-bevy` published to crates.io so that anyone
-but the author can build this crate. Path dependencies are acceptable while
-incubating locally, exactly as `petritype-bevy` depends on `petritype-rs`
-today.
 
 **The wasm target.** The same code in the browser, with costs to budget for:
 a Bevy wasm bundle of 10 to 30 MB before compression and perhaps 5 to 8
@@ -877,8 +943,19 @@ deliberately small: it is the test of whether the picture is legible at all.
    Acceptance: every field of the contract's `NodeView` is visible for a
    focused node, and search walks hits.
 10. **Wasm.** The browser build and its serving story (§13).
-11. **The activity bar** (§13), once `petritype-bevy` can mirror an external
-    net and both Petritype crates are published.
+11. **The pipeline strip** (§10). `petritype-activity` and
+    `petritype-layout` as dependencies, pinned to a commit of
+    `petritype-rs`; the tiles, their pictures and their two lines; the
+    fold, on `K` and a Pipelines button; the cheatsheet's new entries.
+    Designed on 2026-11-17, when the Petritype crates that draw nothing
+    were found to need neither a net in this process nor `petritype-bevy`.
+    Acceptance: in the browser build, a decomposition stored and a search
+    made through the MCP server light the tiles of their pipelines as they
+    run, and a reflect lights its own; a failed run shows as failed;
+    folding the strip removes it, and the frame rate, open or folded, is
+    what it was without the strip; a model brought forward once equals one
+    advanced frame by frame; the release workflow builds with the pinned
+    crates; `just check` passes.
 12. **Retrieval focus.** Parse `retrieval_recorded` from the stream, and read
     `GET /api/retrievals` on connect and on a switch of graph. A Retrieval
     picker in the bar, beside the other pickers, lists the records newest
@@ -899,8 +976,8 @@ deliberately small: it is the test of whether the picture is legible at all.
     kind and action, and the keys of an act's counts, are shown as the
     strings they arrive as, since the contract leaves them open. The bar
     shows the reflect counter, from the graph list's `reflect` fields and
-    then `reflect_counter_updated`. Until slice 11 draws pipeline runs, the
-    log shows them as lines from the pipeline events: a run's start, each
+    then `reflect_counter_updated`. The log shows pipeline runs as lines
+    from the pipeline events: a run's start, each
     transition, and its end, with durations; a run already underway when
     the client connects shows from its next event, since the topology is
     not replayed. A toggle in the bar opens the log in place of the side
