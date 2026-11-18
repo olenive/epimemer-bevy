@@ -85,7 +85,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use bevy::app::PluginGroupBuilder;
-#[cfg(target_arch = "wasm32")]
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use chrono::NaiveDate;
@@ -132,7 +131,8 @@ the periods its claims are about.
 Usage: epimemer-bevy [options]
 
   --hub HOST:PORT     the visualisation hub (default 127.0.0.1:8765)
-  --graph NAME        the graph to draw (default memory)
+  --graph NAME        the graph to draw (default: the active graph of
+                      the session read from)
   --session ID        the session to read from (default: the connected
                       session whose active graph is NAME, else the most
                       recently active connected session)
@@ -273,7 +273,7 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Command, St
         request: hub::Request {
             hub: "127.0.0.1:8765".into(),
             session: None,
-            graph: "memory".into(),
+            graph: None,
         },
         preset: Preset::Free,
         time: TimeMode::Recorded,
@@ -315,7 +315,7 @@ fn parse_args(arguments: impl IntoIterator<Item = String>) -> Result<Command, St
                 }
                 args.request.hub = hub;
             }
-            "--graph" => args.request.graph = value()?,
+            "--graph" => args.request.graph = Some(value()?),
             "--session" => args.request.session = Some(value()?),
             "--preset" => {
                 let name = value()?;
@@ -647,10 +647,14 @@ struct Refusal {
 /// first connection, so that the snapshot is asked for after the
 /// subscription: the stream, where it started, and the number of the
 /// connection made in time, where one was.
-async fn follow(args: &Args, session: &hub::SessionInfo) -> (Option<Stream>, Option<u32>) {
+async fn follow(
+    args: &Args,
+    session: &hub::SessionInfo,
+    graph: &str,
+) -> (Option<Stream>, Option<u32>) {
     let subscription = Subscription {
         session: session.session_id.clone(),
-        graphs: vec![args.request.graph.clone()],
+        graphs: vec![graph.to_owned()],
     };
     let started = match stream::start(&args.request.hub, subscription) {
         Ok(started) => started,
@@ -664,7 +668,7 @@ async fn follow(args: &Args, session: &hub::SessionInfo) -> (Option<Stream>, Opt
             info!(
                 "event stream: subscribed to session {} for graph {:?} on {}",
                 session.session_id,
-                args.request.graph,
+                graph,
                 stream::url(&args.request.hub)
             );
             Some(connection)
@@ -722,14 +726,15 @@ async fn first_load(args: &Args, store: Store) -> Result<Start, Refusal> {
     // The stream subscribes before the snapshot is asked for, so that an
     // event between the two is held in the channel and applied over the
     // snapshot rather than missed.
-    let (started, first_connection) = follow(args, &chosen.session).await;
+    let graph = chosen.graph.clone();
+    let (started, first_connection) = follow(args, &chosen.session, &graph).await;
     let loaded = hub::snapshot(&args.request, chosen)
         .await
         .map_err(|error| failed(error.to_string()))?;
     reload::log_loaded(&loaded);
     let key = MapKey {
         hub: args.request.hub.clone(),
-        graph: args.request.graph.clone(),
+        graph: graph.clone(),
     };
     let map = reload::saved_map(&store, &key);
     let mut prepared =
@@ -797,7 +802,7 @@ async fn first_load(args: &Args, store: Store) -> Result<Start, Refusal> {
     };
     // The snapshot itself is not kept: everything drawn has been read out.
     drop(loaded.snapshot);
-    let catalogue = reload::catalogue(&args.request.hub, &args.request.graph, &arrival);
+    let catalogue = reload::catalogue(&args.request.hub, &graph, &arrival);
     let live_state = LiveState {
         connection: if started.is_some() {
             Connection::Connecting
@@ -923,10 +928,11 @@ fn main() -> AppExit {
             return AppExit::from_code(2);
         }
     };
-    // The plugins first, so that logging is set up for the reads below; the
-    // window opens only when the app runs.
+    // Logging first, so that the reads below are logged. The rest of Bevy's
+    // plugins wait until the graph is read, since the window is titled with
+    // its name, which may be the session's to give.
     let mut app = App::new();
-    app.add_plugins(plugins(&args.request.graph));
+    app.add_plugins(LogPlugin::default());
     // The native reads block rather than wait, so the start runs to its end
     // here.
     let store = map_store(&args);
@@ -937,6 +943,7 @@ fn main() -> AppExit {
             return AppExit::from_code(refusal.code);
         }
     };
+    app.add_plugins(plugins(&start.catalogue.graph).disable::<LogPlugin>());
     assemble(&mut app, args, start);
     app.run()
 }
@@ -972,7 +979,7 @@ fn main() {
         app.add_plugins(LogPlugin::default());
         match first_load(&args, map_store(&args)).await {
             Ok(start) => {
-                app.add_plugins(plugins(&args.request.graph).disable::<LogPlugin>());
+                app.add_plugins(plugins(&start.catalogue.graph).disable::<LogPlugin>());
                 browser::hide_status();
                 assemble(&mut app, args, start);
                 app.run();
@@ -1003,10 +1010,10 @@ mod tests {
     }
 
     #[test]
-    fn the_defaults_read_the_memory_graph_from_the_local_hub() {
+    fn the_defaults_read_the_sessions_active_graph_from_the_local_hub() {
         let args = run("");
         assert_eq!(args.request.hub, "127.0.0.1:8765");
-        assert_eq!(args.request.graph, "memory");
+        assert_eq!(args.request.graph, None);
         assert_eq!(args.request.session, None);
         assert_eq!(args.preset, Preset::Free);
         assert_eq!(args.time, TimeMode::Recorded);
@@ -1200,7 +1207,7 @@ mod tests {
         assert_eq!(args.preset, Preset::Timeline);
         assert_eq!(run("--preset=now").preset, Preset::Now);
         assert_eq!(args.request.hub, "127.0.0.1:9000");
-        assert_eq!(args.request.graph, "games");
+        assert_eq!(args.request.graph.as_deref(), Some("games"));
         assert_eq!(args.request.session.as_deref(), Some("abc"));
         assert_eq!(args.screenshot, Some(PathBuf::from("/tmp/a.png")));
         assert!(args.fps && args.orbit);
@@ -1319,7 +1326,7 @@ mod tests {
             other => panic!("{query:?} gave {other:?}"),
         };
         let plain = run("");
-        assert_eq!(plain.request.graph, "memory");
+        assert_eq!(plain.request.graph, None);
         assert_eq!(plain.preset, Preset::Free);
         assert_eq!(plain.time, TimeMode::Recorded);
         let args = run("?graph=memory&preset=timeline&time=claim&hide&kinds=fact,inference");

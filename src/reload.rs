@@ -499,7 +499,7 @@ fn start_loads(
     let hub_request = hub::Request {
         hub: catalogue.hub.clone(),
         session: Some(request.session.clone()),
-        graph: request.graph.clone(),
+        graph: Some(request.graph.clone()),
     };
     info!(
         "loading graph {:?} from session {}",

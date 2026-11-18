@@ -56,12 +56,13 @@ schema version it speaks is 1.
 Start an Epimemer MCP server, which starts the hub on `127.0.0.1:8765`, then:
 
 ```
-cargo run -- --graph memory
+cargo run
 ```
 
-It follows the connected session whose active graph is the one named, or
-the most recently active connected session, and `--session` names one
-instead. `--hub HOST:PORT` reaches another hub. `--preset` starts at a
+It follows the most recently active connected session and draws that
+session's active graph. `--graph NAME` draws another graph, read from the
+connected session whose active graph it is where there is one, and
+`--session` names the session instead. `--hub HOST:PORT` reaches another hub. `--preset` starts at a
 preset other than the 3D one: `graph`, `timeline` or `now`. `--time
 claim` starts in claim time rather than recorded time. `--focus` starts
 with a node focused, by its id or, for a topic, its exact name.
