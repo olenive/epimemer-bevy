@@ -40,8 +40,8 @@ Non-goals, for the first slices and until said otherwise:
   pipeline views come here as slices 13, 12 and 11 (§14); its
   warnings-settings panel is not carried over, since the MCP tool
   `configure_warnings` is the interface and the log shows the advisories
-  themselves. The dashboard leaves Epimemer in one cut once slices 12 and
-  13 exist.
+  themselves. The dashboard left Epimemer in one cut in its 0.5.0 release
+  (checked 2026-11-18).
 - **Native first.** The browser build came with slice 10 (§13); native
   stays the development target, where the suite runs.
 - **No layout on the server.** Epimemer stays a data source (§12).
@@ -66,7 +66,7 @@ re-litigated without them.
 | Edges | Membership becomes geometry, claim-to-claim edges are lines on hover and focus, succession and merge edges are always drawn, vertically (§5). No ribbons. |
 | Time with no timepoint | A disc at recorded time, never a column (§4). |
 | What Epimemer adds for this | A schema version and an embeddings route, both in the contract. No layout, no as-of snapshot. |
-| The dashboard | Replaced by this client (2026-11-07), and removed from the Epimemer repository in one clean cut once slices 12 and 13 exist. The browser bundle is a release asset here, which `epimemer viz fetch` downloads into a directory the hub serves (§12, §14). |
+| The dashboard | Replaced by this client (2026-11-07), and removed from the Epimemer repository in one clean cut in its 0.5.0 release (checked 2026-11-18). The browser bundle is a release asset here, which `epimemer viz fetch` downloads into a directory the hub serves (§12, §14). |
 
 ## 3. The data as the client sees it
 
@@ -845,8 +845,7 @@ dashboard, both additive, so the schema stays 1:
 
 The hub serves this client's browser bundle from a directory that
 `epimemer viz fetch` fills with a pinned, checksummed release of this
-repository. Both are written on Epimemer's `visualiser-changeover` branch
-and are in no Epimemer release yet (checked 2026-11-17).
+repository. Both came with Epimemer 0.5.0 (checked 2026-11-18).
 
 The contract names what is not promised: positions, as-of snapshots,
 embeddings for segments, the contents of `metadata`, and `claim_kind` on the
@@ -914,10 +913,12 @@ becomes a replay. Nothing in the layout changes for it.
 
 **Historical nodes.** See §5 and §12.
 
-**The valid-time grammar.** Epimemer's timeline-panel page sets it out in
-its §13, with a mockup (`dev-docs/TIMELINE_VISUALISATION.md`). Both move
-here when the dashboard is deleted, as a reference for how validity is
-drawn. Nothing in this design changes for it.
+**The valid-time grammar.** `VALID_TIME_GRAMMAR.md` sets out one mark for
+each validity concept, with a mockup beside it
+(`mockups/valid-time-grammar.html`). Both came from Epimemer's page on the
+dashboard's timeline panel on 2026-11-18, when the dashboard was removed
+there, as a reference for how validity is drawn. Nothing in this design
+changes for it.
 
 **Native binaries.** Native builds as release assets are later work, outside
 the migration; slice 14 releases the browser bundle alone.

@@ -426,7 +426,9 @@ pub struct Request {
     pub hub: String,
     /// A session id, or `None` to choose one by graph.
     pub session: Option<String>,
-    pub graph: String,
+    /// A graph's name, or `None` for the active graph of the session
+    /// followed.
+    pub graph: Option<String>,
 }
 
 /// The snapshot, the session it was read from, what the hub listed on the
@@ -485,16 +487,20 @@ pub async fn load(request: &Request) -> Result<Loaded, HubError> {
 }
 
 /// What a load finds before it asks for the snapshot: the session to
-/// follow, every session the hub listed, and the followed session's graphs.
+/// follow, every session the hub listed, the followed session's graphs,
+/// and the graph to draw.
 #[derive(Debug)]
 pub struct Chosen {
     pub session: SessionInfo,
     pub sessions: Vec<SessionInfo>,
     pub graphs: GraphList,
+    /// The graph asked for, or the session's active graph where none
+    /// was.
+    pub graph: String,
 }
 
 /// The first part of [`load`]: reaches the hub, lists its sessions, chooses
-/// one and checks it holds the graph. Between this and [`snapshot`] is the
+/// one, settles the graph and checks the session holds it. Between this and [`snapshot`] is the
 /// moment to subscribe to the session's events, so that none between the
 /// snapshot and the subscription is missed.
 pub async fn choose(request: &Request) -> Result<Chosen, HubError> {
@@ -522,7 +528,12 @@ pub async fn choose(request: &Request) -> Result<Chosen, HubError> {
         sessions.len(),
         sessions.iter().filter(|s| s.connected).count()
     );
-    let session = choose_session(&sessions, request.session.as_deref(), &request.graph)?.clone();
+    let session = choose_session(
+        &sessions,
+        request.session.as_deref(),
+        request.graph.as_deref(),
+    )?
+    .clone();
     bevy::log::info!(
         "following session {} (pid {}, {}, active graph {:?}, {})",
         session.session_id,
@@ -546,11 +557,21 @@ pub async fn choose(request: &Request) -> Result<Chosen, HubError> {
         graphs.active_graph,
         graphs.graphs.join(", ")
     );
-    if !graphs.graphs.contains(&request.graph) {
+    let graph = match &request.graph {
+        Some(named) => named.clone(),
+        None => {
+            bevy::log::info!(
+                "no graph was named, so the session's active graph {:?} is drawn",
+                graphs.active_graph
+            );
+            graphs.active_graph.clone()
+        }
+    };
+    if !graphs.graphs.contains(&graph) {
         return Err(HubError::Choice(format!(
             "session {} holds no graph named {:?}; it holds {}",
             session.session_id,
-            request.graph,
+            graph,
             graphs.graphs.join(", ")
         )));
     }
@@ -559,23 +580,25 @@ pub async fn choose(request: &Request) -> Result<Chosen, HubError> {
         session,
         sessions,
         graphs,
+        graph,
     })
 }
 
-/// The second part of [`load`]: fetches the snapshot of the graph asked for
-/// from the session [`choose`] chose.
+/// The second part of [`load`]: fetches the snapshot of the graph
+/// [`choose`] settled on, from the session it chose.
 pub async fn snapshot(request: &Request, chosen: Chosen) -> Result<Loaded, HubError> {
     let Chosen {
         session,
         sessions,
         graphs,
+        graph,
     } = chosen;
     let url = transport::url(&request.hub, "/api/snapshot");
     let started = Instant::now();
     let text = get_text(
         &transport::client(),
         &url,
-        &[("session", &session.session_id), ("graph", &request.graph)],
+        &[("session", &session.session_id), ("graph", &graph)],
         SNAPSHOT_LIMIT,
     )
     .await?;
@@ -586,10 +609,10 @@ pub async fn snapshot(request: &Request, chosen: Chosen) -> Result<Loaded, HubEr
         source,
     })?;
     let parse = started.elapsed();
-    if snapshot.graph != request.graph {
+    if snapshot.graph != graph {
         bevy::log::warn!(
             "asked for graph {:?} and the snapshot says it is {:?}",
-            request.graph,
+            graph,
             snapshot.graph
         );
     }
@@ -621,7 +644,7 @@ pub async fn embeddings(
             let request = Request {
                 hub: hub.to_owned(),
                 session: None,
-                graph: graph.to_owned(),
+                graph: Some(graph.to_owned()),
             };
             let chosen = choose(&request)
                 .await
@@ -774,13 +797,14 @@ pub fn schema_note(version: Option<u32>) -> String {
 ///
 /// With an id, that session, which must be connected because the hub
 /// answers reads only for connected sessions. Without one, the connected
-/// session whose active graph is `graph`, else any connected session; among
-/// several, the most recently active. A session's activity is the later of
+/// session whose active graph is `graph`, else any connected session, which
+/// is also the choice when no graph is named; among several, the most
+/// recently active. A session's activity is the later of
 /// its last event and its start, compared as instants rather than as text.
 pub fn choose_session<'a>(
     sessions: &'a [SessionInfo],
     wanted: Option<&str>,
-    graph: &str,
+    graph: Option<&str>,
 ) -> Result<&'a SessionInfo, HubError> {
     if let Some(id) = wanted {
         return match sessions.iter().find(|s| s.session_id == id) {
@@ -800,14 +824,18 @@ pub fn choose_session<'a>(
             .into_iter()
             .max_by_key(|s| (last_active(s), s.session_id.clone()))
     };
-    latest(connected().filter(|s| s.active_graph == graph).collect())
-        .or_else(|| latest(connected().collect()))
-        .ok_or_else(|| {
-            HubError::Choice(format!(
-                "the hub lists no connected session ({} listed); start an Epimemer MCP server",
-                sessions.len()
-            ))
-        })
+    latest(
+        connected()
+            .filter(|s| graph == Some(s.active_graph.as_str()))
+            .collect(),
+    )
+    .or_else(|| latest(connected().collect()))
+    .ok_or_else(|| {
+        HubError::Choice(format!(
+            "the hub lists no connected session ({} listed); start an Epimemer MCP server",
+            sessions.len()
+        ))
+    })
 }
 
 /// The later of a session's last event and its start, in microseconds
@@ -1109,17 +1137,17 @@ mod tests {
             session("b", "memory", false, None),
         ];
         assert_eq!(
-            choose_session(&sessions, Some("a"), "x")
+            choose_session(&sessions, Some("a"), Some("x"))
                 .unwrap()
                 .session_id,
             "a"
         );
         assert!(matches!(
-            choose_session(&sessions, Some("b"), "memory"),
+            choose_session(&sessions, Some("b"), Some("memory")),
             Err(HubError::Choice(_))
         ));
         assert!(matches!(
-            choose_session(&sessions, Some("c"), "memory"),
+            choose_session(&sessions, Some("c"), Some("memory")),
             Err(HubError::Choice(_))
         ));
     }
@@ -1133,17 +1161,22 @@ mod tests {
             session("gone", "memory", false, Some("2026-10-20T15:00:00Z")),
         ];
         assert_eq!(
-            choose_session(&sessions, None, "memory")
+            choose_session(&sessions, None, Some("memory"))
                 .unwrap()
                 .session_id,
             "new"
         );
         assert_eq!(
-            choose_session(&sessions, None, "nowhere")
+            choose_session(&sessions, None, Some("nowhere"))
                 .unwrap()
                 .session_id,
             "other",
             "no session on the graph, so the most recent connected one"
+        );
+        assert_eq!(
+            choose_session(&sessions, None, None).unwrap().session_id,
+            "other",
+            "no graph named, so the most recent connected one"
         );
     }
 
@@ -1158,7 +1191,7 @@ mod tests {
             session("c", "memory", true, Some("2026-10-21T09:30:01+00:00")),
         ];
         assert_eq!(
-            choose_session(&sessions, None, "memory")
+            choose_session(&sessions, None, Some("memory"))
                 .unwrap()
                 .session_id,
             "c"
@@ -1169,11 +1202,11 @@ mod tests {
     fn no_connected_session_is_an_error() {
         let sessions = [session("a", "memory", false, None)];
         assert!(matches!(
-            choose_session(&sessions, None, "memory"),
+            choose_session(&sessions, None, Some("memory")),
             Err(HubError::Choice(_))
         ));
         assert!(matches!(
-            choose_session(&[], None, "memory"),
+            choose_session(&[], None, Some("memory")),
             Err(HubError::Choice(_))
         ));
     }

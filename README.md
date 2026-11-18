@@ -56,12 +56,13 @@ schema version it speaks is 1.
 Start an Epimemer MCP server, which starts the hub on `127.0.0.1:8765`, then:
 
 ```
-cargo run -- --graph memory
+cargo run
 ```
 
-It follows the connected session whose active graph is the one named, or
-the most recently active connected session, and `--session` names one
-instead. `--hub HOST:PORT` reaches another hub. `--preset` starts at a
+It follows the most recently active connected session and draws that
+session's active graph. `--graph NAME` draws another graph, read from the
+connected session whose active graph it is where there is one, and
+`--session` names the session instead. `--hub HOST:PORT` reaches another hub. `--preset` starts at a
 preset other than the 3D one: `graph`, `timeline` or `now`. `--time
 claim` starts in claim time rather than recorded time. `--focus` starts
 with a node focused, by its id or, for a topic, its exact name.
@@ -556,8 +557,7 @@ reason above, and there are two ways to do that:
   this repository, checks it against its checksum and unpacks it into
   `~/.epimemer/viz/current`, which the hub serves; `EPIMEMER_VIZ_BUNDLE_DIR`
   names another directory to serve, such as this checkout's `dist/`. Both
-  are written on Epimemer's `visualiser-changeover` branch and are in no
-  Epimemer release yet (checked 2026-11-17).
+  came with Epimemer 0.5.0 (checked 2026-11-18).
 
 A separate static server would need the hub to send CORS headers, which is
 also an Epimemer change.
